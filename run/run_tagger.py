@@ -155,6 +155,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
         # rel_train_features=[]
 
         for batch_i in tqdm(range(num_batches)):
+
             step += 1
             start_idx = batch_i * config.train_batch_size
             end_idx = min((batch_i + 1) * config.train_batch_size, num_example)
@@ -199,6 +200,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                 optimizer.step()
                 optimizer.zero_grad()
                 global_step += 1
+
 
 
 
@@ -367,8 +369,7 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
         loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst = evaluate(
             model_object,
             eval_features, config,
-            device, eval_sign="dev",
-            relation_flag=False)
+            device, eval_sign="dev")
         eval_performance, _ = compute_performance_eachq(input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst,
                                                         label_mask_lst, type_lst, label_list)
         ent_p_list = np.array([ent_p["f1"] for ent_p in eval_performance["entity"]])
@@ -402,8 +403,7 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
             eval_features,
             config,
             device,
-            eval_sign="test",
-            relation_flag=False)
+            eval_sign="test")
 
         entity_performance, entity_logs = compute_performance(ent_input_lst, ent_doc_lst, ent_input_mask_lst,
                                                               ent_pred_lst, ent_gold_lst, ent_label_mask_lst,
@@ -433,7 +433,7 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
         # evaluate tail entity extraction
         if len(relation_features) > 0:
             _, rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst, rel_etype_lst, rel_gold_relation,rel_logits_lst = evaluate(
-                model_object, relation_features, config, device, eval_sign="test")
+                model_object, relation_features, config, device, eval_sign="test",relation_flag=False)
             relation_performance, relation_logs = compute_performance(rel_input_lst, rel_doc_lst, rel_input_mask_lst,
                                                                       rel_pred_lst, rel_gold_lst, rel_label_mask_lst,
                                                                       rel_type_lst, label_list, tokenizer)
@@ -460,8 +460,7 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
             eval_features,
             config,
             device,
-            eval_sign="train",
-            relation_flag=False)
+            eval_sign="train")
         # input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst,
         # label_mask_lst, type_lst, label_list
         eval_performance, _ = compute_performance_eachq(ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst, ent_gold_lst, ent_label_mask_lst, ent_type_lst, label_list)
@@ -475,7 +474,8 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
                 rel_features,
                 config,
                 device,
-                eval_sign="train")
+                eval_sign="train",
+                relation_flag=False)
 
             eval_performance, _ = compute_performance_eachq(rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst,
                                                             label_list)
@@ -493,7 +493,7 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
                                                          config.max_seq_length, config.max_query_length,
                                                          config.doc_stride)
 
-        print(len(relation_features))
+        print("generate rel number",len(relation_features))
 
         return loss, ent_eval_performance, eval_performance["relation"], ent_weight, rel_weight,relation_features
 
@@ -553,6 +553,8 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
         rel_logits=rel_logits>config.threshold
         num_pred+=torch.sum(rel_logits).item()
         num_gold+=torch.sum(rel_labels).item()
+        # print(num_gold,torch.sum(rel_labels).item(),rel_labels)
+        # print(rel_labels,torch.sum(rel_labels).item(),num_gold)
         num_tp+=torch.sum((rel_logits+rel_labels)==2).item()
 
         n_ques = int(input_ids.shape[0] / batch_size)
@@ -581,7 +583,9 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
 
 
 
+
     if(relation_flag):
+        print(num_pred,num_gold,num_tp)
         rel_p=(num_tp/num_pred) if num_pred else 0
         rel_r=(num_tp/num_gold) if num_gold else 0
         rel_f1=2 * rel_p *rel_r / (rel_p + rel_r) if rel_p+rel_r != 0 else 0

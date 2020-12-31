@@ -413,16 +413,13 @@ def generate_relation_examples(input_ids, doc_tokens, input_masks, pred_labels, 
                             relations=[]
                         )
                         examples.append(example)
-
-
-
             else:
                 #头实体对应的关系列表
                 for relation in entity_relation_map[entity_type]: # live_in, work_for, located_in ...
                     questions = []
                     #从对应的关系生成关系特定的问题
                     for relation_template in question_templates[relation]: # 3 questions
-                        question = relation_template.format(orig_head_entity_text)
+                        question= relation_template.format(orig_head_entity_text)
                         questions.append(question)
                     # print(questions)
                     #获得真实答案

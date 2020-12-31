@@ -434,3 +434,6 @@ def iob2_to_iobes(tags):
     assert len(new_tags) == len(tags)
 
     return new_tags
+
+if __name__=='__main__':
+    read_squad_examples('../datasets/conll04/mrc4ere/train.json', is_training=True)
