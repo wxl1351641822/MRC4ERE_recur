@@ -9,6 +9,7 @@ import argparse
 import random
 import numpy as np
 from tqdm import tqdm, trange
+from utils.relation_template import *
 import torch
 
 root_path = "/".join(os.path.realpath(__file__).split("/")[:-2])
@@ -43,11 +44,17 @@ class DataProcessor(object):
             return lines
 
 def generate_mini_batch_input(all_features, mini_batch_idx, config):
-    rel_label_list = ["work_for", "live_in", "kill", "located_in", "orgbased_in"]
+    if (config.dataname == 'conll04'):
+        rel_label_list = conll04_rel_label_list
+    else:
+        rel_label_list = ace2005_rel_label_list
+        if (config.use_filter_flag == 2):
+            rel_label_list = ace2005_rel_tail_label_list
     rel_label_map = {k: v for v, k in enumerate(rel_label_list)}
     # print(rel_label_map)
     # print(mini_batch_idx)
     batch = [all_features[idx] for idx in mini_batch_idx]
+
     input_ids = torch.tensor([[f.input_ids for f in group.input_features] for group in batch], dtype=torch.long)
     input_mask = torch.tensor([[f.input_mask for f in group.input_features] for group in batch], dtype=torch.long)
     segment_ids = torch.tensor([[f.segment_ids for f in group.input_features] for group in batch], dtype=torch.long)
@@ -61,6 +68,7 @@ def generate_mini_batch_input(all_features, mini_batch_idx, config):
     entity_types = [group.entity_type for group in batch] # batch_size
     relations = [group.relations for group in batch]
     doc_tokens = [group.doc_tokens for group in batch]
+    doc_ids =[group.doc_id for group in batch]
 
     input_ids = input_ids.view(-1, config.max_seq_length)  # batch * 3, max_seq_length
     input_mask = input_mask.view(-1, config.max_seq_length)
@@ -73,16 +81,20 @@ def generate_mini_batch_input(all_features, mini_batch_idx, config):
 
     rel_labels = []
     type_flag=[0]*len(entity_types)
+    # print(rel_label_map)
     for i,(type, entitytype, rels) in enumerate(zip(input_types, entity_types, relations)):
         rel_label = [0] * len(rel_label_list)
         if (type == 'entity'):
             type_flag[i] = 1
             for rel in rels:
                 if (rel["e1_type"] == entitytype):
-                    rel_label[rel_label_map[rel["label"]]] = 1
+                    if (config.use_filter_flag == 2):
+                        rel_label[rel_label_map[(rel["label"],rel["e2_type"])]] = 1
+                    else:
+                        rel_label[rel_label_map[rel["label"]]] = 1
         rel_labels.append(rel_label)
     rel_labels = torch.tensor(rel_labels, dtype=torch.float)
     type_flag=torch.tensor(type_flag,dtype=torch.long)
 
-    return input_ids, input_mask, segment_ids, label_ids, valid_ids, label_mask, input_types, entity_types, relations, doc_tokens,rel_labels,type_flag#batch
+    return doc_ids,input_ids, input_mask, segment_ids, label_ids, valid_ids, label_mask, input_types, entity_types, relations, doc_tokens,rel_labels,type_flag#batch
 

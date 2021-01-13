@@ -22,16 +22,18 @@ from layers.bert_layernorm import BertLayerNorm
 
 
 class BertTagger(nn.Module):
-    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5):
+    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
         super(BertTagger, self).__init__()
         self.num_labels = num_labels
         self.num_ques = num_ques
         self.num_rel_labels=num_rel_labels
+        self.device=device
 
         bert_config = BertConfig.from_dict(config.bert_config)
         self.use_filter=config.use_filter_flag
         self.bert = BertModel(bert_config)
         self.bert = self.bert.from_pretrained(config.bert_model, )
+        self.pool_output=pool_output
 
         if config.bert_frozen == "true":
             print("!-!" * 20)
@@ -67,7 +69,7 @@ class BertTagger(nn.Module):
         batch_size, max_len, feat_dim = sequence_output.size()
 
         valid_output = torch.zeros(batch_size, max_len, feat_dim, dtype=torch.float32,
-                                   device='cuda' if torch.cuda.is_available() else 'cpu')
+                                   device=self.device)
         for i in range(batch_size):
             jj = -1
             for j in range(max_len):
@@ -79,7 +81,11 @@ class BertTagger(nn.Module):
         logits = self.classifier(last_bert_layer) # batch*3, max_seq_len, n_class
 
         m = nn.Sigmoid()
-        rel_logits = self.rel_classifier(sequence_output[:, 0]).reshape(-1, 3, self.num_rel_labels)
+        if(self.pool_output=='avg'):
+            pool_output=torch.mean(sequence_output,dim=1)
+        else:
+            pool_output = sequence_output[:, 0]
+        rel_logits = self.rel_classifier(pool_output).reshape(-1, 3, self.num_rel_labels)
         rel_logits = m(torch.mean(rel_logits, dim=1))
 
         if labels is not None:
@@ -102,7 +108,9 @@ class BertTagger(nn.Module):
                 active_rel=type_flag==1
                 active_rel_logits=rel_logits[active_rel]
                 active_rel_labels=rel_labels[active_rel]
+                # print(active_rel_logits.shape, active_rel_labels.shape)
                 loss2 = loss_fct2(active_rel_logits, active_rel_labels)
+
                 # for i,type in enumerate(input_types):
                 #     # print(type,rel_logits[i:i+1].shape,rel_labels[i:i+1].shape)
                 #     if(type=='entity'):
@@ -110,7 +118,8 @@ class BertTagger(nn.Module):
                 #         loss2+=loss_fct2(rel_logits[i:i+1],rel_labels[i:i+1])
 
                 loss+=loss2
-            return loss
+            logits = F.log_softmax(logits, dim=2)
+            return loss,logits,rel_logits
         else:
             logits = F.log_softmax(logits, dim=2) # batch, max_seq_len, n_class
             return logits,rel_logits

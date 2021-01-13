@@ -14,6 +14,7 @@ class Configurable:
 
         config = SafeConfigParser()
         config.read(config_file)
+
         if extra_args:
             extra_args = { k[2:] : v for k, v in zip(extra_args[0::2], extra_args[1::2]) }
         for section in config.sections():
@@ -135,13 +136,33 @@ class Configurable:
 
     @property
     def use_filter_flag(self):
-        return self._config.getboolean('Run', 'use_filter_flag')
+        return self._config.getint('Run', 'use_filter_flag')#0-不用filter,1-rel filter,2-rel-tail filter
 
     @property
     def use_gen_rel(self):
         return self._config.getboolean('Run', 'use_gen_rel')
 
+    @property
+    def train(self):
+        return self._config.getboolean('Run', 'train')
 
+    @property
+    def predict(self):
+        return self._config.getboolean('Run', 'predict')
+
+    @property
+    def use_train_weight(self):
+        return self._config.getboolean('Run', 'use_train_weight')
+
+
+
+    @property
+    def pool_output(self):
+        return self._config.get('Run', 'pool_output')
+
+    @property
+    def dataname(self):
+        return self._config.get('Data', 'dataname')
 
     @property
     def max_seq_length(self):
@@ -186,6 +207,14 @@ class Configurable:
     @property
     def tb_log_dir(self):
         return self._config.get('Save', 'tb_log_dir')
+
+    @property
+    def predict_model_path(self):
+        return self._config.get('Save', 'predict_model_path')
+
+    def copy_config(self,path):
+        self._config.write(open(path, "w", encoding="utf8"))
+
 
 
 

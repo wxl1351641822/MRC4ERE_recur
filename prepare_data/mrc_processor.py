@@ -3,6 +3,7 @@ import sys
 import csv
 
 from .mrc_utils import *
+from utils.relation_template import *
 
 class DataProcessor(object):
     # base class for data converts for sequence classification datasets
@@ -50,7 +51,14 @@ class MRCProcessor(DataProcessor):
         return label_list
 
     def get_entity_types(self, datasets="conll04"):
-        return ["loc", "peop", "org", "other"]
+
+        if (datasets == 'conll04'):
+            label_list = conll04_ent_label_list
+        else:
+            label_list = ace2005_ent_label_list
+        return label_list
+
+
 
 
 

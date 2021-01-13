@@ -18,7 +18,7 @@ root_path = "/".join(os.path.realpath(__file__).split("/")[:-2])
 if root_path not in sys.path:
     sys.path.append(root_path)
 
-rel_label_list = ["work_for", "live_in", "kill", "located_in", "orgbased_in"]
+
 def cal_f1_score(pcs, rec):
     tmp = 2 * pcs * rec / (pcs + rec)
     return round(tmp, 4)
@@ -56,7 +56,7 @@ def split_index(label_list):
     label_idx = "_".join(str_label_idx)
     return label_idx
 
-def compute_performance_eachq(input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types, label_list, tokenizer=None):
+def  compute_performance_eachq(doc_id_lst,input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types, entity_types,label_list,tokenizer=None,result_dict={},gold_relation=[]):
     '''
     :param input_ids: num_all_example, 3, max_seq
     :param doc_tokens: num_all_example, max_seq
@@ -76,8 +76,10 @@ def compute_performance_eachq(input_ids, doc_tokens, input_masks, pred_labels, g
     rel_accuracy, rel_positive, rel_extracted, rel_true = [0]*num_ques, [0]*num_ques, [0]*num_ques, [0]*num_ques
     num_rel, num_ent = 0, 0
     logs = []
-    for every_input_ids, every_doc_tokens, every_input_masks, every_pred_label, every_golden_label, every_label_masks, every_input_type in \
-            zip(input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types):
+    for doc_id,every_input_ids, every_doc_tokens, every_input_masks, every_pred_label, every_golden_label, every_label_masks, every_input_type,every_entity_type in \
+            zip(doc_id_lst,input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types, entity_types):
+        # if(doc_id not in result_dict):
+        #     result_dict[doc_id]={}
         # every_doc_tokens: max_seq
         # batch_pred_label: 3, max_seq
         # extract gold_label
@@ -133,8 +135,9 @@ def compute_performance_eachq(input_ids, doc_tokens, input_masks, pred_labels, g
         num_extraction = [len(pred_i) for pred_i in final_pred_list]#抽出的实体的数量
 
         # num_true_positive = 0
+        # print(truth_entities)
+        # print(final_pred_list)
         num_true_positive = [0] * num_ques # 对于当前的input example, 每个问题的tp
-
         for ques_idx, pred_i in enumerate(final_pred_list):
             # print(pred_i)
             for entity_idx in pred_i.keys():
@@ -174,11 +177,11 @@ def compute_performance_eachq(input_ids, doc_tokens, input_masks, pred_labels, g
         rel_results.append({"accuracy": rel_acc, "precision": rel_ent_precision, "recall": rel_recall, "f1": rel_f1})
 
     return {"entity":ent_results,
-            "relation":rel_results}, logs
+            "relation":rel_results}, logs,result_dict
 
 
-def compute_performance(input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types, label_list, tokenizer=None,
-                        ent_weight=[1,1,1], rel_weight=[1,1,1]):
+def compute_performance(doc_id_lst,input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types,  entity_types,label_list, tokenizer=None,
+                        ent_weight=[1,1,1], rel_weight=[1,1,1],result_dict={},gold_relation=[]):
     '''
     :param input_ids: num_all_example, 3, max_seq
     :param doc_tokens: num_all_example, max_seq
@@ -196,8 +199,12 @@ def compute_performance(input_ids, doc_tokens, input_masks, pred_labels, gold_la
     rel_accuracy, rel_positive, rel_extracted, rel_true = 0, 0, 0, 0
     num_rel, num_ent = 0, 0
     logs = []
-    for every_input_ids, every_doc_tokens, every_input_masks, every_pred_label, every_golden_label, every_label_masks, every_input_type in \
-            zip(input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types):
+    for doc_id,every_input_ids, every_doc_tokens, every_input_masks, every_pred_label, every_golden_label, every_label_masks, every_input_type,every_entity_type,every_gold_relation in \
+            zip(doc_id_lst,input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, input_types,entity_types,gold_relation):
+        if (doc_id not in result_dict):
+            result_dict[doc_id] = {}
+
+        # print(every_input_type,every_gold_relation)
         # every_doc_tokens: max_seq
         # batch_pred_label: 3, max_seq
         # extract gold_label
@@ -269,11 +276,53 @@ def compute_performance(input_ids, doc_tokens, input_masks, pred_labels, gold_la
             log["doc_tokens"] = every_doc_tokens
             log["questions"] = [" ".join(q) for q in group_questions]
             logs.append(log)
+            ent=[]
+            idx=[]
+            texts=[]
+            for i,(pred,doc) in enumerate(zip(pred_label,every_doc_tokens)):
+                if(pred=='S'):
+                    ent.append({'ids':[i],'text':doc})
+                elif(pred=='B' or pred=='I'):
+                    idx.append(i)
+                    texts.append(doc)
+                elif(pred=='E'):
+                    idx.append(i)
+                    texts.append(doc)
+                    ent.append({'ids': idx, 'text': ' '.join(texts)})
+                    idx=[]
+                    texts=[]
+            if ("relation" not in [doc_id]):
+                result_dict[doc_id]["relations"] = every_gold_relation
+            else:
+                result_dict[doc_id]["relations"].extend(every_gold_relation)
+            if (every_input_type == 'entity'):
+
+                if ('entity' not in result_dict[doc_id]):
+                    result_dict[doc_id]['entity'] = {}
+                if (every_entity_type not in result_dict[doc_id]['entity']):
+                    result_dict[doc_id]['entity'][every_entity_type] = ent
+                else:
+                    result_dict[doc_id]['entity'][every_entity_type].extend(ent)
+            else:
+                # print(log["questions"][0])
+                if ('rel' not in result_dict[doc_id]):
+                    result_dict[doc_id]['rel'] = {}
+                head_entity=get_head_entity(every_entity_type,log["questions"][0])
+                if (every_entity_type+'_'+head_entity not in result_dict[doc_id]['rel']):
+                    result_dict[doc_id]['rel'][every_entity_type+'_'+head_entity] = ent
+                else:
+                    result_dict[doc_id]['rel'][every_entity_type+'_'+head_entity].extend(ent)
+        # print(result_dict)
 
         # compute the number of extracted entitities
         num_true = len(truth_entities)
         num_extraction = len(final_pred_entities)
         num_true_positive = 0
+        # print(truth_entities)
+        with open("test.txt",'a',encoding='utf-8') as f:
+            f.write("doc_id:"+str(doc_id)+ '\n')
+            f.write("pred:"+str(final_pred_entities)+'\n')
+            f.write("truth:" + str(truth_entities) + '\n')
         for entity_idx in final_pred_entities.keys():
             try:
                 if truth_entities[entity_idx] == final_pred_entities[entity_idx]:
@@ -299,10 +348,48 @@ def compute_performance(input_ids, doc_tokens, input_masks, pred_labels, gold_la
 
     ent_accuracy, ent_precision, ent_recall, ent_f1 = compute_f1(ent_accuracy, ent_positive, ent_extracted, ent_true, num_ent)
     rel_accuracy, rel_ent_precision, rel_recall, rel_f1 = compute_f1(rel_accuracy, rel_positive, rel_extracted, rel_true, num_rel)
+    print("rel:rel_acc:{},rel_positive:{}, rel_extracted：{}, rel_true：{}, num_rel：{}".format(rel_accuracy, rel_positive, rel_extracted, rel_true, num_rel))
 
     return  {"entity": {"accuracy": ent_accuracy, "precision": ent_precision, "recall": ent_recall, "f1": ent_f1},
-            "relation": {"accuracy": rel_accuracy, "precision": rel_ent_precision, "recall": rel_recall, "f1": rel_f1}}, logs
+            "relation": {"accuracy": rel_accuracy, "precision": rel_ent_precision, "recall": rel_recall, "f1": rel_f1}}, logs,result_dict
 
+def compute_result_dict(result_dict):
+    # print(result_dict)
+
+
+    tp=0
+    all_rel=0
+    pred_rel_num=0
+    for id,result in result_dict.items():
+        # print(result)
+        relations=result["relations"]
+        entity=result["entity"]
+        if("rel" not in result):
+            continue
+        pred_rel=result["rel"]
+        for k,v in pred_rel.items():
+            # head=k.split('_')[-1]
+            # rel=k.remove(head)
+            pred_rel_num+=len(v)
+        for rel in relations:
+            all_rel+=1
+            rel_label=rel["label"]
+            e1_type=rel["e1_type"]
+            head_entity=''
+            for head in entity[e1_type]:
+                if(head["text"]==rel["e1_text"].lower()):
+                    head_entity=head["text"]
+            if(len(head_entity)==0):
+                continue
+            for k,v in pred_rel.items():
+                head=k.remove(rel_label)[1:].lower()
+                if(head==head_entity):
+                    for tail in v:
+                        if(tail["text"]==rel["e2_text"].lower()):
+                            tp+=1
+    print(tp,all_rel,pred_rel_num)
+
+    pass
 
 def compute_f1(acc, positive, extracted, true, num_example):
 
@@ -331,7 +418,7 @@ def createRandomString(len):
     return raw
 
 
-def generate_relation_examples(input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, entity_types, golden_relations, label_list, config, tokenizer, ent_weight=[1,1,1],rel_logits_lst=[]):
+def generate_relation_examples(doc_id_lst,input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, entity_types, golden_relations, label_list, config, tokenizer, ent_weight=[1,1,1],rel_logits_lst=[],logger=None):
     '''
     :param input_ids: num_all_example, 3, max_seq
     :param doc_tokens: num_all_example, max_seq
@@ -349,13 +436,30 @@ def generate_relation_examples(input_ids, doc_tokens, input_masks, pred_labels, 
 
     print("generate_relation_examples...")
     examples = []
+    use_filter_flag = config.use_filter_flag
+    if(config.dataname=='conll04'):
+        question_templates=conll04_question_templates
+        entity_relation_map=conll04_entity_relation_map
+        rel_label_list=conll04_rel_label_list
+        ent_label_list=conll04_ent_label_list
+    else:
+        question_templates = ace2005_question_templates
+        entity_relation_map = ace2005_entity_relation_map
 
+        ent_label_list = ace2005_ent_label_list
+        rel_label_list=ace2005_rel_label_list
+        if(use_filter_flag==2):
+            rel_label_list =ace2005_rel_tail_label_list
+    total_ans_num = 0
+    total_have_ans_num = 0
+    total_seo_num = 0
     # batch_golden_relation: batch, 3
-    for every_input_ids, every_doc_tokens, every_input_masks, every_pred_label, every_golden_label, every_label_masks, entity_type, golden_relation,rel_logits in \
-            tqdm(zip(input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, entity_types, golden_relations,rel_logits_lst)):
+    for every_doc_id,every_input_ids, every_doc_tokens, every_input_masks, every_pred_label, every_golden_label, every_label_masks, entity_type, golden_relation,rel_logits in \
+            tqdm(zip(doc_id_lst,input_ids, doc_tokens, input_masks, pred_labels, gold_labels, label_masks, entity_types, golden_relations,rel_logits_lst)):
         # batch_doc: 3, max_seq
         # batch_pred_label: 3, max_seq
         # extract gold_label
+
         mask_index = [tmp_idx for tmp_idx, tmp in enumerate(every_label_masks) if tmp != 0]
         gold_label_ids = [tmp for tmp_idx, tmp in enumerate(every_golden_label) if tmp_idx in mask_index]
         gold_label_ids = gold_label_ids[1:-1]
@@ -382,49 +486,109 @@ def generate_relation_examples(input_ids, doc_tokens, input_masks, pred_labels, 
         # final_pred_label = final_pred_label[1:-1]
         # final_pred_entities = extract_entities(final_pred_label, label_list)
         # print(final_pred_entities,len(rel_logits))
-        use_filter_flag=config.use_filter_flag
+
         for key, indicator in final_pred_entities.items():
             start_idx = int(key.split("_")[0])
             end_idx = int(key.split("_")[-1])
             head_entity_list = every_doc_tokens[start_idx:end_idx+1]
             orig_head_entity_text = " ".join(head_entity_list)
-            if(use_filter_flag):#use filter
+
+            if(use_filter_flag>0):#use filter
                 # 头实体对应的关系列表
                 for i,rel_flag in enumerate(rel_logits):  # live_in, work_for, located_in ...
+                    ans_num=0
                     if(rel_flag):
-                        relation=rel_label_list[i]
-                        questions = []
-                        # 从对应的关系生成关系特定的问题
-                        for relation_template in question_templates[relation]:  # 3 questions
-                            question = relation_template.format(orig_head_entity_text)
-                            questions.append(question)
-                        # print(questions)
-                        # 获得真实答案
-                        label = extract_relation_answer(golden_relation, relation, orig_head_entity_text,
-                                                        len(every_doc_tokens))
 
-                        example = MRCExample(
-                            qas_id=createRandomString(10),
-                            question_text=questions,
-                            doc_tokens=every_doc_tokens,
-                            label=label,
-                            q_type="relation",
-                            entity_type=entity_type,
-                            relations=[]
-                        )
-                        examples.append(example)
+                        if(config.dataname=='conll04'):
+                            relation = rel_label_list[i]
+                            questions = []
+                            # 从对应的关系生成关系特定的问题
+                            for relation_template in question_templates[relation]:  # 3 questions
+                                question = relation_template.format(orig_head_entity_text)
+                                questions.append(question)
+                            # print(questions)
+                            # 获得真实答案
+                            label,ans_num = extract_relation_answer(golden_relation, relation, orig_head_entity_text,
+                                                            len(every_doc_tokens))
+
+                            example = MRCExample(
+                                doc_id=every_doc_id,
+                                qas_id=createRandomString(10),
+                                question_text=questions,
+                                doc_tokens=every_doc_tokens,
+                                label=label,
+                                q_type="relation",
+                                entity_type=entity_type,
+                                relations=[]
+                            )
+                            examples.append(example)
+                        else:
+                            relation = rel_label_list[i]
+                            if(config.use_filter_flag==1):
+                                for ent_type in ent_label_list:
+                                    questions = []
+                                    # print(str((entity_type,relation,ent_type)))
+                                    # 从对应的关系生成关系特定的问题
+                                    for relation_template in question_templates[str((entity_type,relation,ent_type))]:  # 3 questions
+                                        question = relation_template.format(orig_head_entity_text)
+                                        questions.append(question)
+                                    # print(questions)
+                                    # 获得真实答案
+                                    label,ans_num = extract_relation_answer(golden_relation, relation, orig_head_entity_text,
+                                                                    len(every_doc_tokens))
+
+                                    example = MRCExample(
+                                        doc_id=every_doc_id,
+                                        qas_id=createRandomString(10),
+                                        question_text=questions,
+                                        doc_tokens=every_doc_tokens,
+                                        label=label,
+                                        q_type="relation",
+                                        entity_type=entity_type,
+                                        relations=[]
+                                    )
+                                    examples.append(example)
+                            else:#=2
+                                questions = []
+                                relation=str((entity_type,relation[0],relation[1]))
+                                # 从对应的关系生成关系特定的问题
+                                for relation_template in question_templates[relation]:  # 3 questions
+                                    question = relation_template.format(orig_head_entity_text)
+                                    questions.append(question)
+                                # print(questions)
+                                # 获得真实答案
+                                label,ans_num = extract_relation_answer(golden_relation, relation, orig_head_entity_text,
+                                                                len(every_doc_tokens))
+
+                                example = MRCExample(
+                                    doc_id=every_doc_id,
+                                    qas_id=createRandomString(10),
+                                    question_text=questions,
+                                    doc_tokens=every_doc_tokens,
+                                    label=label,
+                                    q_type="relation",
+                                    entity_type=entity_type,
+                                    relations=[]
+                                )
+                                examples.append(example)
+                    if (ans_num):
+                        total_ans_num += ans_num
+                        total_have_ans_num += 1
+
             else:
                 #头实体对应的关系列表
                 for relation in entity_relation_map[entity_type]: # live_in, work_for, located_in ...
                     questions = []
+                    ans_num = 0
                     #从对应的关系生成关系特定的问题
                     for relation_template in question_templates[relation]: # 3 questions
                         question= relation_template.format(orig_head_entity_text)
                         questions.append(question)
                     # print(questions)
                     #获得真实答案
-                    label = extract_relation_answer(golden_relation, relation, orig_head_entity_text, len(every_doc_tokens))
+                    label,ans_num = extract_relation_answer(golden_relation, relation, orig_head_entity_text, len(every_doc_tokens))
                     example = MRCExample(
+                        doc_id=every_doc_id,
                         qas_id=createRandomString(10),
                         question_text=questions,
                         doc_tokens=every_doc_tokens,
@@ -434,7 +598,14 @@ def generate_relation_examples(input_ids, doc_tokens, input_masks, pred_labels, 
                         relations=[]
                     )
                     examples.append(example)
+                    if (ans_num):
+                        total_ans_num += ans_num
+                        total_have_ans_num += 1
+                        total_seo_num+=1 if ans_num>1 else 0
 
+
+
+    logger.info("have_ans:{}/{},total_ans_num:{},seo_num:{}/{}".format(total_have_ans_num,len(examples),total_ans_num,total_seo_num,len(examples)))
     return examples
 
 
@@ -444,6 +615,7 @@ def extract_relation_answer(golden_relations, relation, head_entity_text, len_do
         if relation == golden_relation["label"] and golden_relation["e1_text"].startswith(head_entity_text):
             tail_entities.append(golden_relation["e2_ids"])
 
+
     label = ["O"] * len_doc
     for ids in tail_entities:
         label[ids[0]] = "B"
@@ -451,4 +623,13 @@ def extract_relation_answer(golden_relations, relation, head_entity_text, len_do
             label[id] = "I"
     label = iob2_to_iobes(label)
 
-    return label
+    return label,len(tail_entities)
+
+def get_head_entity(every_entity_type,q):
+    q_list=q.split(' ')
+    if(type=='kill'):
+        s= ' '.join(q_list[6:-1]).replace(' ##','')
+        return  s
+    else:
+        s=' '.join(q_list[3:-4]).replace(' ##','')
+        return s

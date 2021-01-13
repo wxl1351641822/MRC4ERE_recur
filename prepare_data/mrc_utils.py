@@ -5,7 +5,7 @@ sys.path.append("..")
 import json
 import collections
 from .mrc_example import MRCExample, InputFeature, GroupFeature
-from log.get_logger import logger
+
 from pytorch_pretrained_bert.tokenization import whitespace_tokenize, BasicTokenizer, BertTokenizer
 
 
@@ -21,7 +21,8 @@ def read_squad_examples(input_file, is_training):
 
     examples = []
     for entry in input_data:
-        for paragraph in entry["paragraphs"]:
+        print(len(entry["paragraphs"]))
+        for doc_id,paragraph in enumerate(entry["paragraphs"]):
             paragraph_text = paragraph["context"]
             all_relations = paragraph["relations"]
             doc_tokens = []
@@ -57,6 +58,7 @@ def read_squad_examples(input_file, is_training):
 
                 example = MRCExample(
                     qas_id=qas_id,
+                    doc_id=doc_id,
                     question_text=questions,
                     doc_tokens=doc_tokens,
                     label=label,
@@ -168,6 +170,7 @@ def convert_relation_examples_to_features(examples, tokenizer, label_list, max_s
 
                 group_features.append(
                     InputFeature(
+
                         input_ids=input_ids,
                         input_mask=input_mask,
                         segment_ids=segment_ids,
@@ -314,15 +317,19 @@ def convert_examples_to_features(examples, tokenizer, label_list, max_seq_length
             )
             # print(input_ids,input_mask,segment_ids,label_ids,label_mask,valid)
             # break
-
-        group_feature = GroupFeature( # 一个doc的某一种问题，对应多个不同表达方式但意思相同的问题
-            doc_tokens=example.doc_tokens,
-            q_type=example.q_type,
-            entity_type=example.entity_type,
-            relations=example.relations,
-            input_features=input_features
-        )
-        features.append(group_feature)
+        # print(len(input_features))
+        if(len(input_features)==3):
+            group_feature = GroupFeature( # 一个doc的某一种问题，对应多个不同表达方式但意思相同的问题
+                doc_id=example.doc_id,
+                doc_tokens=example.doc_tokens,
+                q_type=example.q_type,
+                entity_type=example.entity_type,
+                relations=example.relations,
+                input_features=input_features
+            )
+            features.append(group_feature)
+        else:
+            print(example.doc_id,example)
     return features
 
 
@@ -434,6 +441,8 @@ def iob2_to_iobes(tags):
     assert len(new_tags) == len(tags)
 
     return new_tags
+
+
 
 if __name__=='__main__':
     read_squad_examples('../datasets/conll04/mrc4ere/train.json', is_training=True)

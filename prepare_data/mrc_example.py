@@ -18,8 +18,9 @@ class InputExample(object):
 
 class GroupFeature(object):
     # a single set of features of data
-    def __init__(self, doc_tokens, q_type, entity_type, relations, input_features):
+    def __init__(self, doc_tokens, q_type, entity_type, relations, input_features,doc_id):
         self.doc_tokens = doc_tokens
+        self.doc_id=doc_id
         self.type = q_type
         self.entity_type = entity_type
         self.relations = relations
@@ -60,9 +61,11 @@ class MRCExample(object):
                  q_type,
                  relations,
                  label=None,
+                 doc_id=None,
                  orig_answer_text=None,
                  start_position=None,
                  end_position=None):
+        self.doc_id=doc_id
         self.qas_id = qas_id
         self.question_text = question_text
         self.doc_tokens = doc_tokens
