@@ -155,6 +155,33 @@ class Configurable:
         return self._config.getboolean('Run', 'use_train_weight')
 
 
+    #
+    @property
+    def model(self):
+        # model = 'mrctplink'  # mrc4ere,mrctplink
+        return self._config.get('Run', 'model')
+
+
+
+    @property
+    def ent_matrix_label(self):
+        # ent_matrix_label = True  # mrc4ere不起作用，但mrctplink中均为matrix,如果关，则ent为BIOES的序列标注，不mix才有作用
+        return self._config.getboolean('Run', 'ent_matrix_label')
+
+    @property
+    def mix_ent_rel(self):
+        # mix_ent_rel = True  # 是否共用解码器fc
+        return self._config.getboolean('Run', 'mix_ent_rel')
+
+    @property
+    def rel_tail_head(self):
+        # rel_tail_head = False  # True:rel区分beg,end,False：rel仅有beg预测
+        return self._config.getboolean('Run', 'rel_tail_head')
+
+    @property
+    def multi_decoder(self):
+        # multi_decoder = 1  # 1:只有一个解码器,问题区分head/tail(如果有的话）,2:[beg_label,end_label],ent的第二个解码器不用全O
+        return self._config.getint('Run', 'multi_decoder')
 
     @property
     def pool_output(self):

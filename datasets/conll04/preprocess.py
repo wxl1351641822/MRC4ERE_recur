@@ -39,6 +39,12 @@ class conll04PreProcess:
         if (not os.path.exists(self.output_dir)):
             os.makedirs(self.output_dir)
         pickle.dump(args, open(self.output_dir + 'args', 'wb'))
+        self.model=args.model
+        self.mix_ent_rel=args.mix_ent_rel
+
+        self.ent_matrix_label=args.ent_matrix_label
+        self.rel_tail_head = args.rel_tail_head
+        self.multi_decoder=args.multi_decoder
 
     def read_file(self,path):
         with open(path, 'r', encoding='utf-8') as f:
@@ -151,6 +157,9 @@ class conll04PreProcess:
             rel_class_num_one_doc_dict1 = defaultdict(int)
             head_rel_one_doc_dict1 = defaultdict(int)
             head_name_rel_one_doc_dict1 = defaultdict(int)
+            count_rel=defaultdict(list)
+            count_relh = defaultdict(list)
+            count_relt = defaultdict(list)
             for i, (rel, index) in enumerate(zip(train_rels, train_rel_indexs)):
                 if (rel[0] == 'N'):
                     continue
@@ -169,6 +178,9 @@ class conll04PreProcess:
                     if (r not in head_2_rel[entities[head]["type"]]):
                         head_2_rel[entities[head]["type"]].append(r)
                     relations.append({"rel_type": r, "head": head, "tail": tail})
+                    count_rel[r].append([head,tail])
+                    count_relh[r].append(head)
+                    count_relt[r].append(tail)
                     rel_class_num_dict[r] += 1
                     seo[head] += 1
                     seo[tail] += 1
@@ -176,6 +188,12 @@ class conll04PreProcess:
                     rel_class_num_one_doc_dict1[r] += 1
                     head_rel_one_doc_dict1[r + '_' + entities[head]["type"]] += 1
                     head_name_rel_one_doc_dict1[r + '_' + entities[head]["entity"]] += 1
+            for r,v in count_rel.items():
+                for h in count_relh[r]:
+                    for t in count_relt[r]:
+                        if([h,t] not in v):
+                            print([h,t],r,v)
+
             for k, v in rel_class_num_one_doc_dict1.items():
                 rel_class_num_one_doc_dict[k].append(v)
             for k, v in head_rel_one_doc_dict1.items():
@@ -313,6 +331,7 @@ class conll04PreProcess:
                     if ((ent["entity"], rel_type) not in rel_label):
                         rel_label[(ent["entity"], rel_type)] = ['O'] * seq_len
             for rel in t[name]:
+                # print(rel)
                 head = entities[rel["head"]]
                 # 1.构建head问题
                 tail = entities[rel["tail"]]
@@ -323,6 +342,7 @@ class conll04PreProcess:
                 relations.append({"label": rel["rel_type"], "e1_ids": list(range(head["beg"], head["end"] + 1)),
                                   "e2_ids": list(range(tail["beg"], tail["end"] + 1)), "e1_type": head["type"],
                                   "e2_type": tail["type"], "e1_text": head["entity"], "e2_text": tail["entity"]})
+                # print(relations[-1])
 
             type = 'entity'
             for ent_type, label in ent_label.items():
@@ -334,14 +354,160 @@ class conll04PreProcess:
                 ent_qas_num += 1
             type = 'relation'
             for (head_entity, rel_type), label in rel_label.items():
+
+                idd = "qas_" + str(qas_id)
+                # print(idd,head_entity, rel_type, label)
+                qas_id += 1
+                questions = rel_q_temp[rel_type].copy()
+                for i in range(3):
+                    # print(questions[i],head_entity)
+                    questions[i] = questions[i].format(head_entity)
+                    # print(questions[i])
+                rel_qas_num += 1
+                # print(questions)
+                qas.append({"questions": questions, "label": label, "type": type, "entity_type": rel_type, "id": idd})
+                # print(qas[-1])
+            qas_num += len(qas)
+            # print(qas)
+            # print(ent_label)
+            # print(rel_label)
+            # print(relations)
+            paragraph["qas"] = qas
+            paragraph["relations"] = relations
+            paragraphs.append(paragraph)
+
+        print("qas num:{},ent_qas_num:{},rel_qas_num:{}".format(qas_num, ent_qas_num, rel_qas_num))
+        data = [{"paragraphs": paragraphs, "title": "conll04"}]
+        print("save in ",path)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump({"data": data}, f)
+
+    def get_mrctp_json(self, data2, path, name="relations"):
+        def indext2label(label, beg=-1, end=-1,type='entity'):
+            #ent:1-实体头，2-实体结尾，3-单字实体
+            #rel:头实体->尾实体
+            if (not self.ent_matrix_label and type == 'entity'):
+                    if (beg == end):
+                        label[beg] = 'S'
+                    else:
+                        label[beg] = 'B'
+                        for i in range(beg + 1, end):
+                            label[i] = "I"
+                        label[end] = 'E'
+            else:#矩阵形式
+                label_type = '[E]'
+                if(beg<end):
+                    if(type=='relation'):
+                        label_type = '[+]'
+                    index=beg*seq_len+end-int((beg+1)*beg/2)
+                else:
+                    if (type == 'relation'):
+                        label_type = '[-]'
+                    index = end * seq_len + beg - int((end + 1) * end / 2)
+                if (type == 'entity'):
+                        label[index]=label_type
+                else:
+                   label[index]=label_type
+
+            return label
+
+        qas_num = 0
+        ent_qas_num = 0
+        rel_qas_num = 0
+        ent_label_list = conll04_ent_label_list
+        rel_label_list = conll04_rel_label_list
+        entity_relation_map = conll04_entity_relation_map
+        ent_q_temp = conll04_ent_question_templates
+
+        rel_q_temp=conll04_rel_question_templates
+
+        paragraphs = []
+        qas_id = 1
+
+        for t in data2:
+            id = t["id"]
+            paragraph = {}
+            seq_len = len(t["text"])
+            context = " ".join(t["text"])
+            paragraph["context"] = context
+            entities = t["entities"]
+            ent_label = {}
+            for ent_type in ent_label_list:
+                if (self.ent_matrix_label):
+                    if (self.multi_decoder == 2 and self.mix_ent_rel):
+                        ent_label[ent_type] = [['O'] * int(seq_len * (seq_len + 1) / 2),['O'] * int(seq_len * (seq_len + 1) / 2)]
+                    else:
+                        ent_label[ent_type] = ['O'] * int(seq_len * (seq_len + 1) / 2)
+                else:
+                    ent_label[ent_type] = ['O'] * seq_len
+
+            relations = []
+
+            for ent in entities.values():
+                entity_type = ent["type"]
+                if(self.multi_decoder==2 and self.mix_ent_rel):
+                    ent_label[entity_type][0] = indext2label(ent_label[entity_type][0], ent["beg"], ent["end"])
+                else:
+                    ent_label[entity_type] = indext2label(ent_label[entity_type], ent["beg"], ent["end"])
+            rel_label = {}
+            for rel_type in rel_label_list:
+                if (self.rel_tail_head):
+                    if(self.multi_decoder==1):
+                        rel_label[rel_type+"@head"]=['O']*int(seq_len*(seq_len+1)/2)
+                        rel_label[rel_type + "@tail"] = ['O']*int(seq_len*(seq_len+1)/2)
+                    else:
+                        rel_label[rel_type]=[['O']*int(seq_len*(seq_len+1)/2),['O']*int(seq_len*(seq_len+1)/2)]
+                else:
+                    rel_label[rel_type] = ['O'] *int(seq_len * (seq_len + 1) / 2)
+
+            for rel in t[name]:
+                head = entities[rel["head"]]
+                # 1.构建head问题
+                tail = entities[rel["tail"]]
+
+                if(self.rel_tail_head):
+                    if (self.multi_decoder == 1):
+                        rel_label[rel["rel_type"]+"@head"] = indext2label(
+                            rel_label[rel["rel_type"]+"@head"],
+                            head["beg"], tail["beg"],type = 'relation')
+                        rel_label[rel["rel_type"] + "@tail"] = indext2label(
+                            rel_label[rel["rel_type"] + "@tail"],
+                            head["end"], tail["end"],type = 'relation')
+                    else:
+                        for i in range(2):
+                            rel_label[rel["rel_type"]][i] = indext2label(
+                                rel_label[rel["rel_type"]][i],
+                                head["beg"], tail["beg"],type = 'relation')
+                else:
+                    rel_label[rel["rel_type"]] = indext2label(
+                        rel_label[rel["rel_type"]],
+                        head["beg"], tail["beg"],type = 'relation')
+
+                relations.append({"label": rel["rel_type"], "e1_ids": list(range(head["beg"], head["end"] + 1)),
+                                  "e2_ids": list(range(tail["beg"], tail["end"] + 1)), "e1_type": head["type"],
+                                  "e2_type": tail["type"], "e1_text": head["entity"], "e2_text": tail["entity"]})
+            qas = []
+            type = 'entity'
+            for ent_type, label in ent_label.items():
+                idd = "qas_" + str(qas_id)
+                qas_id += 1
+                qas.append(
+                    {"questions": ent_q_temp[ent_type], "label": label, "type": type, "entity_type": ent_type,
+                     "id": idd})
+                ent_qas_num += 1
+            type = 'relation'
+            for rel_type, label in rel_label.items():
+
+                rel_type=rel_type.split('@')[0]
                 idd = "qas_" + str(qas_id)
                 qas_id += 1
                 questions = rel_q_temp[rel_type]
-                for i in range(3):
-                    questions[i] = questions[i].format(head_entity)
+                if (self.rel_tail_head and self.multi_decoder==1):
+                    questions=['[{}]'.format(rel_type.split('@')[-1])+q for q in questions]
                 rel_qas_num += 1
-
                 qas.append({"questions": questions, "label": label, "type": type, "entity_type": rel_type, "id": idd})
+                # print(qas[-1])
+
             qas_num += len(qas)
             # print(qas)
             # print(ent_label)
@@ -355,6 +521,7 @@ class conll04PreProcess:
         data = [{"paragraphs": paragraphs, "title": "conll04"}]
         with open(path, 'w', encoding='utf-8') as f:
             json.dump({"data": data}, f)
+
     def process(self):
         conll04_origin_dir='../../../数据集/conll04/origin'
         file_name=["train","dev","test"]
@@ -363,15 +530,34 @@ class conll04PreProcess:
             path=os.path.join(conll04_origin_dir,name+'.txt')
             data=self.read_file(path)
             data,_,_=self.tongji(data)
-            self.get_json(data,self.output_dir+name+'.json')
-            self.get_json(data, self.output_dir+ name + '_epo.json',name="epo")
-            self.get_json(data, self.output_dir+ name + '_spo.json',name="seo")
-            self.get_json(data, self.output_dir+ name + '_normal.json',name="normal")
+            if(self.model=='mrc4ere'):
+                self.get_json(data,self.output_dir+name+'.json')
+                self.get_json(data, self.output_dir+ name + '_epo.json',name="epo")
+                self.get_json(data, self.output_dir+ name + '_spo.json',name="seo")
+                self.get_json(data, self.output_dir+ name + '_normal.json',name="normal")
+            else:#mrc+tplink
+                self.get_mrctp_json(data, self.output_dir + name + '.json')
+                self.get_json(data, self.output_dir + name + '_epo.json', name="epo")
+                self.get_json(data, self.output_dir + name + '_spo.json', name="seo")
+                self.get_json(data, self.output_dir + name + '_normal.json', name="normal")
 import argparse
 import pickle
 parser = argparse.ArgumentParser()
 parser.add_argument("--output_dir", default='./mymrc4ere/')
+parser.add_argument("--model", default='mrc4ere')#mrc4ere,mrctplink
+parser.add_argument("--mix_ent_rel", type=bool,default=True)
+parser.add_argument("--ent_matrix_label",  type=bool,default=False)
+parser.add_argument("--rel_tail_head",  type=bool,default=False)
+parser.add_argument("--multi_decoder",  type=int,default=1)
 args = parser.parse_args()
+
+
+# args.model='mrctplink'
+if(args.model=='mrctplink'):
+    args.ent_matrix_label=True
+    # args.martix_label=True
+    args.output_dir=args.model+('_matrix' if args.ent_matrix_label else '')+('_rel_head_tail' if args.rel_tail_head else '')+('_'+str(args.multi_decoder))+'/'
+print(args.output_dir)
 conll04PreProcess(args).process()
 # qas num:8776,ent_qas_num:3640,rel_qas_num:5136
 # qas num:8776,ent_qas_num:3640,rel_qas_num:5136

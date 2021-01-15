@@ -185,14 +185,17 @@ def convert_relation_examples_to_features(examples, tokenizer, label_list, max_s
     return features
 
 
-def convert_examples_to_features(examples, tokenizer, label_list, max_seq_length, max_query_length, doc_stride,type=None):
+def convert_examples_to_features(examples, tokenizer, label_list, max_seq_length, max_query_length, doc_stride,type=None,max_ans_length=None):
     """Loads a data file into a list of `InputBatch`s."""
+    if(max_ans_length is None):
+        max_ans_length=max_seq_length
 
     label_map = {label : i for i, label in enumerate(label_list)}
 
     features = []
     for (ex_index,example) in enumerate(examples):
         if (type is not None and example.q_type != type):
+            # print(type,example.q_type)
             continue
         textlist = example.doc_tokens
         labellist = example.label
@@ -232,12 +235,14 @@ def convert_examples_to_features(examples, tokenizer, label_list, max_seq_length
         #为什么他的序列标注的标签只有问题部分有？只有一段，而文本有两段……而且文本裁剪过
 
         input_features = []
+
+
         label_ids = []
         label_ids.append(label_map["[CLS]"])
         label_ids.extend([label_map[l] for l in labels])
         label_ids.append(label_map["[SEP]"])
         label_mask = [1] * len(label_ids)
-        while len(label_ids) < max_seq_length:
+        while len(label_ids) < max_ans_length:
             label_ids.append(0)
             label_mask.append(0)
 
@@ -249,7 +254,7 @@ def convert_examples_to_features(examples, tokenizer, label_list, max_seq_length
             max_doc_length = max_seq_length - len(query_tokens) - 3
             if len(doc_tokens) >= max_doc_length:
                 doc_tokens = doc_tokens[0:max_doc_length]
-                labels = labels[0:max_doc_length]
+                labels = labels[0:max_seq_length]
                 doc_valid = doc_valid[0:max_doc_length]
                 # label_mask = label_mask[0:max_doc_length]
 
@@ -303,7 +308,7 @@ def convert_examples_to_features(examples, tokenizer, label_list, max_seq_length
             assert len(segment_ids) == max_seq_length
             assert len(label_ids) == max_seq_length
             assert len(valid) == max_seq_length
-            assert len(label_mask) == max_seq_length
+            assert len(label_mask) == max_ans_length
 
             input_features.append(
                 InputFeature(

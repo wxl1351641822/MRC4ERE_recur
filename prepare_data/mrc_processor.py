@@ -26,6 +26,8 @@ class DataProcessor(object):
             return lines
 
 class MRCProcessor(DataProcessor):
+    def __init__(self):
+        pass
 
     def get_train_examples(self, data_dir):
         train_examples = read_squad_examples(data_dir, is_training=True)
@@ -39,15 +41,19 @@ class MRCProcessor(DataProcessor):
         test_examples = read_squad_examples(data_dir, is_training=False)
         return test_examples
 
-    def get_labels(self, datasets):
-        label_list = ['[CLS]','[SEP]']
-        for dataset in datasets:
-            for example in dataset:
-                for tmp in list(set(example.label)):
-                    if tmp not in label_list:
-                        label_list.append(tmp)
-                        # print(tmp)
 
+    def get_labels(self, datasets):
+
+        label_list =['[CLS]', '[SEP]','E', 'O', 'B', 'S', 'I']
+        # for dataset in datasets:
+        #     for example in dataset:
+        #         for tmp in list(set(example.label)):
+        #             if tmp not in label_list:
+        #                 # print(example.label,example)
+        #                 label_list.append(tmp)
+        #                 print(tmp)
+        # label_list=['[CLS]','[SEP]','S','E','O','B','I']#conll04
+        # label_list=['[CLS]', '[SEP]', 'S', 'B', 'E', 'O', 'I']#ace2005
         return label_list
 
     def get_entity_types(self, datasets="conll04"):

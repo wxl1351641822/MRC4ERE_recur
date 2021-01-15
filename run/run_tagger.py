@@ -31,10 +31,22 @@ from prepare_data.mrc_utils import convert_examples_to_features, convert_relatio
 from utils.evaluate_funcs import compute_performance, generate_relation_examples, compute_performance_eachq,compute_result_dict
 from log.get_logger import get_logger
 from utils.relation_template import *
+from prepare_data.dataset import MRC4TPLinkerDataset
 
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 def load_data(config):
-    data_processor = MRCProcessor()
+    # print(config.model)
+    if(config.model=="mrc4ere"):
+        print("MRCProcess")
+        data_processor = MRCProcessor()
+    else:
+        print("MRC4TPLinkerDataset")
+        data_processor=MRC4TPLinkerDataset()
 
     # load data exampels
     logger.info("loading {} ...".format(config.train_file))
@@ -52,21 +64,32 @@ def load_data(config):
     label_list = data_processor.get_labels([train_examples, dev_examples, test_examples])
     print(label_list)
     tokenizer = BertTokenizer.from_pretrained(config.bert_model, do_lower_case=True)
-
-    # convert data example into featrues
-    ent_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
-                                                  config.max_query_length, config.doc_stride,type="entity")
-    # convert data example into featrues
-    rel_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
-                                                  config.max_query_length, config.doc_stride,type="relation")
-    dev_features = convert_examples_to_features(dev_examples, tokenizer, label_list, config.max_seq_length,
-                                                config.max_query_length, config.doc_stride)
-    test_features = convert_examples_to_features(test_examples, tokenizer, label_list, config.max_seq_length,
-                                                 config.max_query_length, config.doc_stride,type="entity")
+    if(config.model=='mrc4ere'):
+        # convert data example into featrues
+        ent_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+                                                      config.max_query_length, config.doc_stride,type="entity")
+        # convert data example into featrues
+        rel_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+                                                      config.max_query_length, config.doc_stride,type="relation")
+        dev_features = convert_examples_to_features(dev_examples, tokenizer, label_list, config.max_seq_length,
+                                                    config.max_query_length, config.doc_stride)
+        test_features = convert_examples_to_features(test_examples, tokenizer, label_list, config.max_seq_length,
+                                                     config.max_query_length, config.doc_stride,type="entity")
+    else:#mrctplink
+        # convert data example into featrues
+        ent_train_features = data_processor.convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+                                                          config.max_query_length, config.doc_stride, type="entity")
+        # convert data example into featrues
+        rel_train_features = data_processor.convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+                                                          config.max_query_length, config.doc_stride, type="relation")
+        dev_features = data_processor.convert_examples_to_features(dev_examples, tokenizer, label_list, config.max_seq_length,
+                                                    config.max_query_length, config.doc_stride)
+        test_features = data_processor.convert_examples_to_features(test_examples, tokenizer, label_list, config.max_seq_length,
+                                                         config.max_query_length, config.doc_stride, type="entity")
     # print(rel_train_features[0])
-    print(len(ent_train_features),len(rel_train_features))
+    print(len(ent_train_features),len(rel_train_features),len(dev_features),len(test_features))
     num_train_steps = int(len(train_examples) / config.train_batch_size * config.epochs)
-    return tokenizer, ent_train_features,rel_train_features, dev_features, test_features, num_train_steps, label_list
+    return data_processor,tokenizer, ent_train_features,rel_train_features, dev_features, test_features, num_train_steps, label_list
 
 
 def load_model(config, num_train_steps, label_list,rel_labels):
@@ -107,7 +130,7 @@ def warmup_linear(x, warmup=0.002):
 
 
 def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, dev_features, test_features, config,
-          device, n_gpu, label_list, num_train_steps,eval_train=False,eval_test=True,eval_dev=False):
+          device, n_gpu, label_list, num_train_steps,eval_train=False,eval_test=True,eval_dev=False,begepoch=0,data_processor=None):
     writer = tb.SummaryWriter(config.tb_log_dir)
     global_step = 0
     nb_tr_steps = 0
@@ -143,7 +166,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     model_to_save=model
     best_dev_epoch=0
     lr_this_step = config.learning_rate
-    for idx in range(int(config.epochs)):
+    for idx in range(begepoch+1,int(config.epochs)):
 
         if idx == 4:
             logger.info(idx)
@@ -245,19 +268,29 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
 
         logger.info("")
         logger.info("current training loss is : " + str(loss.item()))
+        output_model_dir = os.path.join(config.output_dir, config.dataname, "{}".format(id))
+        if (not os.path.exists(output_model_dir)):
+            os.makedirs(output_model_dir)
+            config.copy_config(output_model_dir + "/default.cfg")
+        if config.export_model:
+            output_model_file = os.path.join(output_model_dir, "epoch{}_bert_model.bin".format(idx))
+            torch.save(model_to_save.state_dict(), output_model_file)
+            logger.info("save in " + output_model_file)
         ent_weight, rel_weight=[1.0]*3,[1.0]*3
         # print(len(ent_train_features),len(rel_train_features))
         if(eval_train):
-
+            logger.info("......" * 10)
+            logger.info("TRAIN EVAL")
             tmp_train_loss, tmp_train_entity, tmp_train_relation, ent_weight, rel_weight,rel_train_features = eval_checkpoint(model, ent_train_features,
                                                                                                      config, device, n_gpu,
                                                                                                      label_list,
-                                                                                                     eval_sign="train",tokenizer=tokenizer,rel_features=rel_train_features)
+                                                                                                     eval_sign="train",tokenizer=tokenizer,rel_features=rel_train_features,
+                                                                                                                              data_processor=data_processor)
 
             logger.info("ent_weight: {}".format(ent_weight))
             logger.info("rel_weight: {}".format(rel_weight))
             logger.info("loss: {}".format(tmp_train_loss))
-            logger.info("tmp_ train_entity: {}".format(tmp_train_entity))
+            logger.info("tmp_train_entity: {}".format(tmp_train_entity))
             logger.info("tmp_train_relation: {}".format(tmp_train_relation))
             writer.add_scalar("epoch_train_loss", tmp_train_loss, num_batches * idx)
             for i in range(3):
@@ -274,7 +307,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             tmp_dev_loss, tmp_dev_entity, tmp_dev_relation, dev_ent_weight, dev_rel_weight = eval_checkpoint(model, dev_features,
                                                                                                      config, device, n_gpu,
                                                                                                      label_list,
-                                                                                                     eval_sign="dev",ent_weight=ent_weight,rel_weight=rel_weight)
+                                                                                                     eval_sign="dev",ent_weight=ent_weight,rel_weight=rel_weight,data_processor=data_processor)
             if (not config.use_train_weight):
                 ent_weight, rel_weight = dev_ent_weight, dev_rel_weight
                 logger.info("ent_weight: {}".format(ent_weight))
@@ -300,7 +333,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             logger.info("TEST:")
 
             _, tmp_test_entity, tmp_test_relation = eval_checkpoint(model, test_features, config, device, n_gpu,
-                                                                    label_list, "test", tokenizer, ent_weight, rel_weight)
+                                                                    label_list, "test", tokenizer, ent_weight, rel_weight,data_processor=data_processor)
             # writer.add_scalar("dev_loss", tmp_dev_loss.item(), num_batches * idx)
             writer.add_scalar("test_entf1", tmp_test_entity["f1"], num_batches * idx)
             writer.add_scalar("test_relf1", tmp_test_relation["f1"], num_batches * idx)
@@ -345,13 +378,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
         # if(idx-test_best_f1[0]>3):
         #     logger.info("early_stopping!!")
         #     break
-        output_model_dir= os.path.join(config.output_dir, "{}".format(id))
-        if(not os.path.exists(output_model_dir)):
-            os.makedirs(output_model_dir)
-            config.copy_config(output_model_dir+"/default.cfg")
-        if config.export_model:
-            output_model_file=os.path.join(output_model_dir,"epoch{}_bert_model.bin".format(idx))
-            torch.save(model_to_save.state_dict(), output_model_file)
+
         # break
 
 
@@ -359,9 +386,10 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
 
     # export a trained mdoel
     # model_to_save = model
-    output_model_file = os.path.join(config.output_dir, "{}".format(id),"best_bert_model.bin")
+    output_model_file = os.path.join(config.output_dir, config.dataname,"{}".format(id),"best_bert_model.bin")
     if config.export_model:
         torch.save(model_to_save.state_dict(), output_model_file)
+        logger.info("save in "+output_model_file)
 
     logger.info("TEST: loss={}".format(test_best_loss))
     logger.info("current best precision, recall, f1, acc :")
@@ -380,11 +408,13 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                   test_best_acc]
         r_list='\t'.join([str(r) for r in r_list])
         f.write(r_list+'\n')
-
+    with open(os.path.join(config.output_dir, config.dataname,"{}".format(id),"log"),'a',encoding='utf-8') as f:
+        with open("../log/log_output_vote_token/log-{}".format(id),'r',encoding='utf-8') as f1:
+            f.write(f1.read())
     return  output_model_file
 
 def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_list, eval_sign="dev", tokenizer=None,
-                    ent_weight=[1, 1, 1], rel_weight=[1, 1, 1],rel_features=[]):
+                    ent_weight=[1, 1, 1], rel_weight=[1, 1, 1],rel_features=[],data_processor=None):
     if eval_sign == "dev":
         loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst,doc_id_lst = evaluate(
             model_object,
@@ -456,9 +486,14 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
                                                        ent_gold_lst, ent_label_mask_lst, ent_etype_lst,
                                                        ent_gold_relation, label_list, config, tokenizer,
                                                        ent_weight,rel_logits_lst,logger=logger)  # batch x 3 x max_seq_len
-        relation_features = convert_examples_to_features(relation_examples, tokenizer, label_list,
-                                                         config.max_seq_length, config.max_query_length,
-                                                         config.doc_stride)
+        if(config.model=='mrc4ere'):
+            relation_features = convert_examples_to_features(relation_examples, tokenizer, label_list,
+                                                             config.max_seq_length, config.max_query_length,
+                                                             config.doc_stride)
+        else:
+            relation_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
+                                                             config.max_seq_length, config.max_query_length,
+                                                             config.doc_stride)
 
         # evaluate tail entity extraction
         if len(relation_features) > 0:
@@ -525,9 +560,15 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
                                                            ent_gold_lst, ent_label_mask_lst, ent_etype_lst,
                                                            ent_gold_relation, label_list, config, tokenizer,
                                                            ent_weight,rel_logits_lst,logger=logger)  # batch x 3 x max_seq_len
-            rel_features = convert_examples_to_features(relation_examples, tokenizer, label_list,
-                                                             config.max_seq_length, config.max_query_length,
-                                                             config.doc_stride)
+            if (config.model == 'mrc4ere'):
+                # print(relation_examples)
+                rel_features = convert_examples_to_features(relation_examples, tokenizer, label_list,
+                                                                 config.max_seq_length, config.max_query_length,
+                                                                 config.doc_stride)
+            else:
+                rel_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
+                                                            config.max_seq_length, config.max_query_length,
+                                                            config.doc_stride)
 
         print("generate rel number",len(rel_features))
 
@@ -618,7 +659,7 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
         doc_id_lst+=doc_ids
         eval_steps += 1
         # if(batch_i==10):
-        # break
+        #     break
 
 
     if(relation_flag):
@@ -639,7 +680,7 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
 
 
 def predict(tokenizer, model, ent_train_features,rel_train_features, dev_features, test_features, config,
-          device, n_gpu, label_list,ent_weight=[1.0]*3,rel_weight=[1.0]*3,eval_train=True,eval_test=True,eval_dev=True):
+          device, n_gpu, label_list,ent_weight=[1.0]*3,rel_weight=[1.0]*3,eval_train=True,eval_test=True,eval_dev=True,data_processor=None):
 
     if(eval_train):
         # print(len(ent_train_features),len(rel_train_features))
@@ -650,18 +691,19 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
                 model, ent_train_features,
                 config, device, n_gpu,
                 label_list,
-                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features)
+                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features,data_processor=data_processor)
         else:
             tmp_train_loss, tmp_train_entity, tmp_train_relation,ent_weight, rel_weight, rel_train_features1 = eval_checkpoint(
                 model, ent_train_features,
                 config, device, n_gpu,
                 label_list,
-                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features)
+                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features,data_processor=data_processor)
         logger.info("ent_weight: {}".format(ent_weight))
         logger.info("rel_weight: {}".format(rel_weight))
         logger.info("loss: {}".format(tmp_train_loss))
-        logger.info("tmp_dev_entity: {}".format(tmp_train_entity))
-        logger.info("tmp_dev_relation: {}".format(tmp_train_relation))
+        logger.info("tmp_train_entity: {}".format(tmp_train_entity))
+        logger.info("tmp_train_relation: {}".format(tmp_train_relation))
+
 
     if(eval_dev):
         logger.info("......" * 10)
@@ -673,7 +715,8 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
                                                                                config, device, n_gpu,
                                                                                label_list,
                                                                                eval_sign="dev", ent_weight=ent_weight,
-                                                                               rel_weight=rel_weight,tokenizer=tokenizer)
+                                                                               rel_weight=rel_weight,tokenizer=tokenizer,
+                                                                                data_processor=data_processor)
 
         if(not config.use_train_weight):
             ent_weight,rel_weight=dev_ent_weight, dev_rel_weight
@@ -690,7 +733,8 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
         with open("test.txt", 'a', encoding='utf-8') as f:
             f.write("......" * 10+"TEST"+"......" * 10+'\n')
         _, tmp_test_entity, tmp_test_relation = eval_checkpoint(model, test_features, config, device, n_gpu,
-                                                                label_list, "test", tokenizer, ent_weight, rel_weight)
+                                                                label_list, "test", tokenizer, ent_weight,
+                                                                rel_weight,data_processor=data_processor)
 
 
         test_ent_acc, test_ent_pcs, test_ent_recall, test_ent_f1 = tmp_test_entity["accuracy"], tmp_test_entity[
@@ -709,61 +753,137 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
                                                                       test_rel_f1))
         logger.info("")
 
-def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False):
+def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_old_model=False,begepoch=0):
 
     config = Configurable(args.config_file, extra_args, logger)
+    set_seed(config.seed)
     if (config.dataname == 'conll04'):
         rel_label_list = conll04_rel_label_list
     else:
         rel_label_list = ace2005_rel_label_list
         if (config.use_filter_flag == 2):
             rel_label_list = ace2005_rel_tail_label_list
-    tokenizer, ent_train_loader, rel_train_loader, dev_loader, test_loader, num_train_steps, label_list = load_data(
+    data_processor,tokenizer, ent_train_loader, rel_train_loader, dev_loader, test_loader, num_train_steps, label_list = load_data(
         config)
     model, optimizer, device, n_gpu = load_model(config, num_train_steps, label_list, rel_label_list)
     output_model_file = ""
-
-    if (config.train):
-        output_model_file = train(tokenizer, model, optimizer, ent_train_loader, rel_train_loader, dev_loader,
-                                  test_loader, config, device, n_gpu, label_list,
-                                  num_train_steps,eval_train=eval_train,eval_test=eval_test,eval_dev=eval_dev)
-    if (config.predict):
-        # if(config.train):
-        #     config.predict_model_path=output_model_file
-        logger.info("")
-        predict_model_path = os.path.join(config.output_dir, config.predict_model_path)
-        predict_model_path1 = os.path.join(config.output_dir, "{}".format(id), config.predict_model_path)
-        if (config.train):
-            predict_model_path = os.path.join(config.output_dir, "best_bert_model.bin")
-            predict_model_path1 = os.path.join(config.output_dir, "{}".format(id), "best_bert_model.bin")
+    if(use_old_model):
+        predict_model_path = os.path.join(config.output_dir, config.dataname, "{}".format(id),
+                                           "epoch{}_bert_model.bin".format(begepoch))
         if (os.path.exists(predict_model_path)):
             logger.info("load {} ....".format(predict_model_path))
             model.load_state_dict(torch.load(predict_model_path, map_location=device))
-            predict(tokenizer, model, ent_train_loader, rel_train_loader, dev_loader, test_loader, config, device,
-                    n_gpu, label_list,eval_train=eval_train,eval_test=eval_test,eval_dev=eval_dev)
-        elif (os.path.exists(predict_model_path1)):
-            logger.info("load {} ....".format(predict_model_path))
-            model.load_state_dict(torch.load(predict_model_path, map_location=device))
-            predict(tokenizer, model, ent_train_loader, rel_train_loader, dev_loader, test_loader, config, device,
-                    n_gpu, label_list,eval_train=eval_train,eval_test=eval_test,eval_dev=eval_dev)
+            # state_dict=model.state_dict()
+            # for k,v in state_dict.items():
+            #     logger.info(k)
+            # print("loading的参数")
+            # for k,v in torch.load(predict_model_path, map_location=device).items():
+            #     # print(k)
+            #     logger.info(k)
+            #     if(k not in state_dict):
+            #         logger.info("not in model",k)
+            #     else:
+            #         print(v)
+            #         print(state_dict[k])
         else:
-            logger.info("该模型不存在！！！")
+            logger.info("{} model is not exists...".format(predict_model_path))
+        # output_model_dir = os.path.join(config.output_dir, config.dataname, "{}".format(id))
+        # if (not os.path.exists(output_model_dir)):
+        #     os.makedirs(output_model_dir)
+        #     config.copy_config(output_model_dir + "/default.cfg")
+        # if config.export_model:
+        #     output_model_file = os.path.join(output_model_dir, "epoch{}_bert_model.bin".format(idx))
+        #     torch.save(model_to_save.state_dict(), output_model_file)
+    if (config.train):
+        output_model_file = train(tokenizer, model, optimizer, ent_train_loader, rel_train_loader, dev_loader,
+                                  test_loader, config, device, n_gpu, label_list,
+                                  num_train_steps,eval_train=eval_train,eval_test=eval_test,eval_dev=eval_dev,begepoch=begepoch,data_processor=data_processor)
+    if (config.predict):
+        # if(config.train):
+        #     config.predict_model_path=output_model_file
+        if(not use_old_model):
+            logger.info("")
+            # predict_model_path = os.path.join(config.output_dir, config.predict_model_path)
+            # predict_model_path1 = os.path.join(config.output_dir, "{}".format(id), config.predict_model_path)
+            predict_model_path = os.path.join(config.output_dir,config.dataname, "{}".format(id), config.predict_model_path)
+            if (config.train):
+                logger.info("load {} ....".format(predict_model_path))
+                predict_model_path = os.path.join(predict_model_path, "best_bert_model.bin")
+                # predict_model_path1 = os.path.join(config.output_dir, "{}".format(id), "best_bert_model.bin")
+            if (os.path.exists(predict_model_path)):
+                logger.info("load {} ....".format(predict_model_path))
+                model.load_state_dict(torch.load(predict_model_path, map_location=device))
+            # elif (os.path.exists(predict_model_path1)):
+            #     logger.info("load {} ....".format(predict_model_path1))
+            #     model.load_state_dict(torch.load(predict_model_path1, map_location=device))
+            else:
+                logger.info("model is not exists...")
+        predict(tokenizer, model, ent_train_loader, rel_train_loader, dev_loader, test_loader, config, device,
+                n_gpu, label_list, eval_train=eval_train, eval_test=eval_test, eval_dev=eval_dev,data_processor=data_processor)
 
 if __name__ == "__main__":
     dt = datetime.now()
     id = dt.strftime("%Y%m%d-%H%M%S")
-    dataset=['conll04','ace2005'][0]
+    index=[0,0]
+    # use_old_model=not False
+    use_old_model=False
+    dataset = ['conll04', 'ace2005'][index[0]]
     # id='predict_20210108-101550'
-    logger = get_logger(id)
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument('--config_file', default='../configs/default_{}.cfg'.format(dataset))
-    args, extra_args = argparser.parse_known_args()
-    main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
-    args.config_file = '../configs/default_{}_spo.cfg'.format(dataset)
-    main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
-    args.config_file = '../configs/default_{}_epo.cfg'.format(dataset)
-    main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
-    args.config_file = '../configs/default_{}_normal.cfg'.format(dataset)
-    main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
+    model = ['default', 'mrctp'][index[1]]
+    if(use_old_model):
+        config_file = ''
+        flag = [True] * 4
+        # id='20210114-104820'#59
+        # begepoch = 0
+        # id='20210113-154131'#13
+        # begepoch =10
+        #conll04:mymrc4ere
+        # id='20210114-165645'#['[CLS]','[SEP]','S','E','O','B','I']
+        # begepoch=14#
+        # config_file ='../ckpt/{}/{}/default.cfg'.format(dataset,id)
+        # # config_file='../configs/{}_{}_spo.cfg'.format(model,dataset)
+        # # print(config_file)
+        # # onfig_file = '../configs/{}_{}_epo.cfg'.format(dataset, model)
+        # # onfig_file = '../configs/{}_{}_normal.cfg'.format(dataset, model)
+        # flag[2] = not flag[2]
+
+        id='20210114-113954'#ace2005，['[CLS]', '[SEP]', 'S', 'B', 'E', 'O', 'I']
+        text='predict'
+        begepoch=15
+        index = [1, 0]
+        dataset = ['conll04', 'ace2005'][index[0]]
+        model = ['default', 'mrctp'][index[1]]
+        # flag[0]=not flag[0]
+        # flag[1] = not flag[1]
+        # flag[2]=not flag[2]
+
+
+
+        logger = get_logger(id)
+        argparser = argparse.ArgumentParser()
+        argparser.add_argument('--config_file', default='../ckpt/default/20210113-154850/{}/{}/default.cfg'.format(dataset,id))
+        args, extra_args = argparser.parse_known_args()
+        if(len(config_file)>0):
+            args.config_file=config_file
+        main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],use_old_model=flag[3],begepoch=begepoch)
+
+    else:
+
+        logger = get_logger(id)
+        argparser = argparse.ArgumentParser()
+        argparser.add_argument('--config_file', default='../configs/{}_{}.cfg'.format(model,dataset))
+
+        args, extra_args = argparser.parse_known_args()
+        print(args.config_file)
+        main(id, args, extra_args,eval_train=True,eval_test=True,eval_dev=True)
+        args.config_file = '../configs/{}_{}_spo.cfg'.format(model,dataset)
+        main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
+        args.config_file = '../configs/{}_{}_epo.cfg'.format(model,dataset)
+        main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
+        args.config_file = '../configs/{}_{}_normal.cfg'.format(model,dataset)
+        main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
     # id="predict_20210108-101550"
 
+#['[CLS]', '[SEP]', 'E', 'O', 'B', 'S', 'I']
+
+# ACe2005,['[CLS]', '[SEP]', 'S', 'O', 'B', 'E', 'I']
