@@ -85,4 +85,3 @@ class MRCExample(object):
         s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
         s += ", label: [%s]" % (" ".join(self.label))
         return s
-

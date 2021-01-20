@@ -267,23 +267,42 @@ def block2qas(ber, dataset_tag, title="", threshold=1, max_distance=45,is_mq=Fal
         raise Exception("this data set is not yet supported")
     block, ents, relas = ber#entity=[(entity_type, nstart, nend, entity_str),...],rel=[(r,(type1,start1,end1,entity1).(type1,start1,end1,entity1)),...]
     res = {'context': block, 'title': title}
+    RC=[]
     # QA turn 1
     dict1 = {k: get_question(question_templates, k,is_mq=is_mq) for k in entities}
     qat1 = {dict1[k]: [] for k in dict1}
+    q2e={q:k for k,q in dict1.items()}
 
+    # print(ents)
+    ent_list=[]
+    if(len(ents)!=len(list(set(ents)))):
+        print(len(ents),len(list(set(ents))))
     for en in ents:
+        if(en in ent_list):
+            print(en)
+        else:
+            ent_list.append(en)
         q = dict1[en[0]]
         qat1[q].append(en)
+    qat1={"qas":qat1,"q2e":q2e}
 
     # QA turn 2
     mt2_over_num = 0
     mt2_q_len=[]
 
     mt2_len=[]
+    for rel in relas:
+        RC.append(rel[0])
+    RC=list(set(RC))
+    res["RC"]=RC
     if max_distance > 0:
         dict2 = {(rel[1], rel[0], rel[2][0]): [] for rel in relas}
         for rel in relas:
-            dict2[(rel[1], rel[0], rel[2][0])].append(rel[2])#dict2[((type1,start1,end1,entity1),r,type2]=[(type2,start2,end2,entity2),...]
+            if(rel[2] not in dict2[(rel[1], rel[0], rel[2][0])]):
+                dict2[(rel[1], rel[0], rel[2][0])].append(rel[2])#dict2[((type1,start1,end1,entity1),r,type2]=[(type2,start2,end2,entity2),...]
+            else:
+                print(rel)
+
 
         qat2 = []
         ents1 = sorted(ents, key=lambda x: x[1])#start排序
@@ -306,6 +325,7 @@ def block2qas(ber, dataset_tag, title="", threshold=1, max_distance=45,is_mq=Fal
                             qas[q] = dict2.get(k, [])
                             q2k[q] = k
             qat2.append({'head_entity': ent1, "qas": qas, "q2k": q2k})
+
             for q, el in qas.items():
                 if (len(el) > 1):
                     mt2_over_num += 1
@@ -317,31 +337,33 @@ def block2qas(ber, dataset_tag, title="", threshold=1, max_distance=45,is_mq=Fal
             dict2[(rel[1], rel[0], rel[2][0])].append(rel[2])
 
         qat2 = []
+        relations=ace2005_entity_relation_map
         for ent in ents:
             qas = {}
             q2k={}
-            for rel_type in relations:
-                for ent_type in entities:
-                    k = (ent, rel_type, ent_type)
-                    idx1, idx2 = idx1s[ent[0]], idx2s[(rel_type, ent_type)]
-                    if dist[idx1][idx2] >= threshold:
-                        q = get_question(question_templates,
-                                         ent, rel_type, ent_type,is_mq=is_mq)
-                        qas[q] = dict2.get(k, [])##qas[q]=[(type2,start2,end2,entity2),...]
-                        q2k[q]=k
+            for rel in relations[ent[0]]:
+                _,rel_type,ent_type=eval(rel)
+                k = (ent, rel_type, ent_type)
+                idx1, idx2 = idx1s[ent[0]], idx2s[(rel_type, ent_type)]
+                if dist[idx1][idx2] >= threshold:
+                    q = get_question(question_templates,
+                                     ent, rel_type, ent_type,is_mq=is_mq)
+                    qas[q] = dict2.get(k, [])##qas[q]=[(type2,start2,end2,entity2),...]-tail_ent
+                    q2k[q]=k
             qat2.append({'head_entity': ent, "qas": qas,"q2k":q2k})
             for q, el in qas.items():
                 mt2_len.append(len(el))
                 if (len(el) > 1):
                     mt2_over_num += 1
             mt2_q_len.append(len(qas.keys()))
+            # print(len(qas.keys()))
     mt1_over_num=0
     mt1_len = []
     for q,el in qat1.items():
         mt1_len.append(len(el))
         if(len(el)>1):
             mt1_over_num+=1
-
+    # print(mt2_q_len)
     qas = [qat1, qat2]
     res["qa_pairs"] = qas
     return res,mt1_over_num,mt2_over_num,mt1_len,mt2_len,mt2_q_len
@@ -448,15 +470,16 @@ def process(data_dir, output_dir, tokenizer, is_test, window_size, overlap, data
     rel_dic=Counter(rel_num)
     ent_dic=Counter(ent_num)
     seq_dic=Counter(seq_num)
+    print("block sum:",len(data))
     print("seq len:",sum(seq_num),seq_dic)
     print("rel:", sum(rel_num),rel_dic)
     print("ent:",sum(ent_num),ent_dic)
     mt1_dic=Counter(mt1_len)
     mt2_dic=Counter(mt2_len)
     mt2_q_dic=Counter(mt2_q_len)
-    print("第1轮问题的答案数量:", sum(mt1_len), mt1_dic)
+    print("第1轮问题的答案数量:",len(mt1_len),sum(mt1_len), mt1_dic)
     print("第2轮问题的答案数量:", sum(mt2_len), mt2_dic)
-    print("第2轮问题的问题数量:", sum(mt2_q_len), mt2_q_dic)
+    print("第2轮问题的问题数量:", len(mt2_q_len),sum(mt2_q_len), mt2_q_dic)
     # plt.bar(list(seq_dic.keys()), list(seq_dic.values()))
     # plt.plot(list(rel_dic.keys()),list(rel_dic.values()))
     # plt.plot(list(ent_dic.keys()), list(ent_dic.values()))
@@ -471,14 +494,15 @@ def process(data_dir, output_dir, tokenizer, is_test, window_size, overlap, data
         save_path = os.path.join(output_dir, os.path.split(data_dir)[-1] + "_mq.json")
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(mq_data, f, sort_keys=True, indent=4)
-
     save_path = os.path.join(output_dir, os.path.split(data_dir)[-1] + ".json")
     with open(save_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, sort_keys=True, indent=4)
 
+
 def get_mqdata(data_dir,data):
     mq_data = {"data": [{"title": data_dir.split('/')[-2], "paragraphs": []}]}
     qas_i = 0
+    qas_len=[]
     for res in tqdm(data):
         i = 0
         token_id_2_string_id = []
@@ -493,13 +517,16 @@ def get_mqdata(data_dir,data):
         relations = []
         context = p["context"].split(' ')
         seq_length = len(context)
+        q2e=res["qa_pairs"][0]["q2e"]
         for q, ans in res["qa_pairs"][
-            0].items():  # ans=[(entity_type, nstart, nend, entity_str),...],rel=[(r,(type1,start1,end1,entity1).(type1,start1,end1,entity1)),...]
+            0]["qas"].items():  # ans=[(entity_type, nstart, nend, entity_str),...],rel=[(r,(type1,start1,end1,entity1).(type1,start1,end1,entity1)),...]
+            ent_type=q2e[q]
             qs = q.split("\t")
+
+            qas.append({"questions": qs, "type": "entity", "entity_type": ent_type, "id": "qas_" + str(qas_i),
+                        "label": ["O"] * seq_length})
             if (len(ans) == 0):
                 continue
-            qas.append({"questions": qs, "type": "entity", "entity_type": ans[0][0], "id": "qas_" + str(qas_i),
-                        "label": ["O"] * seq_length})
             qas_i += 1
             for type, s, e, ent in ans:  # (entity_type, nstart, nend, entity_str)
                 # print(res["context"][s:e],ent,s,e)
@@ -517,24 +544,29 @@ def get_mqdata(data_dir,data):
                         qas[-1]["label"][i] = 'I'
                     qas[-1]["label"][e - 1] = 'E'
                 # print(qas[-1])
-
+        q_list=[]
         for triple in res["qa_pairs"][1]:  # {"head_entity": ent1, "qas": qas}
-            head = triple["head_entity"]
-            for q, ans in triple["qas"].items():  # qas[q]=[(type2,start2,end2,entity2),...]
+            head = triple["head_entity"]# (entity_type, nstart, nend, entity_str)
+            head=(head[0],token_id_2_string_id[head[1]],token_id_2_string_id[head[2]],head[3])
+            if(' '.join(context[head[1]:head[2]])!=head[3]):
+                print(head)
+            q2k=triple["q2k"]#q2k[q] = (ent, rel_type, ent_type)
+            for q, ans in triple["qas"].items():  # qas[q]=[(type2,start2,end2,entity2),...]\
+                tail_type=q2k[q][-1]
                 qs = q.split("\t")
-                if (len(ans) < 1):
-                    continue
                 qas.append(
-                    {"questions": qs, "type": "relation", "entity_type": triple["q2k"][q][1], "tail_type": ans[0][0],
-                     "id": "qas_" + str(qas_i),
+                    {"questions": qs, "type": "relation", "entity_type": triple["q2k"][q][1], "tail_type": tail_type,
+                     "id": "qas_" + str(qas_i),"head":head,
                      "label": ["O"] * seq_length})
                 qas_i += 1
+                if (len(ans) < 1):
+                    continue
                 for type, s, e, ent in ans:  # (entity_type, nstart, nend, entity_str)
                     s = token_id_2_string_id[s]
                     e = token_id_2_string_id[e]
                     assert ' '.join(context[s:e]) == ent
                     relations.append({"label": triple["q2k"][q][1], "e1_ids": list(
-                        range(token_id_2_string_id[head[1]], token_id_2_string_id[head[2]])),
+                        range(head[1],head[2])),
                                       "e2_ids": list(range(s, e)), "e1_type": head[0], "e2_type": type,
                                       "e1_text": head[3], "e2_text": ent})
                     if (s == e - 1):
@@ -544,10 +576,18 @@ def get_mqdata(data_dir,data):
                         for i in range(s + 1, e - 1):
                             qas[-1]["label"][i] = 'I'
                         qas[-1]["label"][e - 1] = 'E'
+                # if('\t'.join(qs) not in q_list):
+                #
+                #     q_list.append('\t'.join(qs))
+                # else:
+                #     print(head, triple["q2k"][q][1],ans[0][0])
+                #     print(qas[-1])
         p["relations"] = relations
         p["qas"] = qas
+        qas_len.append(len(qas))
         mq_data["data"][0]["paragraphs"].append(p)
         # print(p)
+    print(sum(qas_len),qas_len)
     return mq_data
 
 if __name__ == "__main__":
@@ -564,12 +604,14 @@ if __name__ == "__main__":
                         default="./")
     parser.add_argument("--pretrained_model_path",
                         default='/data/home/wuyuming/wxl/pretrained_models/bert-base-uncased')
-    parser.add_argument("--max_distance", type=int, default=45,
+    parser.add_argument("--max_distance", type=int, default=-1,
                         help="used to filter relations by distance from the head entity")
     parser.add_argument("--is_mq", type=bool, default=True,
                         help="多问题吗？")
+    parser.add_argument("--is_bidirect", type=bool, default=False,
+                        help="仅从前向后链接则为False；")
     args = parser.parse_args()
-
+    # args.max_distance=0
     # datadir='../../../数据集/ACE2005/multiQA_raw_data'
     if not args.is_test or args.is_mq:
         output_dir = "{}/{}_overlap_{}_window_{}_threshold_{}_max_distance_{}_is_mq_{}".format(args.output_base_dir, os.path.split(
@@ -578,12 +620,16 @@ if __name__ == "__main__":
         output_dir = args.output_base_dir
     from transformers import BertTokenizer
     # print(args.pretrained_model_path)
+    print("***train***"*10)
     tokenizer = BertTokenizer.from_pretrained(args.pretrained_model_path)
     process(args.data_dir, output_dir, tokenizer, args.is_test,
             args.window_size, args.overlap, args.dataset_tag, args.threshold, args.max_distance,args.is_mq)
     args.data_dir=dir+'dev'
+    print("***dev***"*10)
+
     process(args.data_dir, output_dir, tokenizer, args.is_test,
             args.window_size, args.overlap, args.dataset_tag, args.threshold, args.max_distance, args.is_mq)
     args.data_dir = dir + 'test'
+    print("***test***" * 10)
     process(args.data_dir, output_dir, tokenizer, args.is_test,
             args.window_size, args.overlap, args.dataset_tag, args.threshold, args.max_distance, args.is_mq)

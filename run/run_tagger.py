@@ -5,8 +5,8 @@ import os
 import sys
 
 sys.path.append("..")
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ['CUDA_LAUNCH_BLOCKING'] = "0"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 import csv
 import logging
@@ -27,11 +27,11 @@ import torch.utils.tensorboard as tb
 
 from prepare_data.mrc_processor import MRCProcessor
 from models.bert_mrc import BertTagger
-from prepare_data.mrc_utils import convert_examples_to_features, convert_relation_examples_to_features
+# from prepare_data.mrc_utils import convert_relation_examples_to_features
 from utils.evaluate_funcs import compute_performance, generate_relation_examples, compute_performance_eachq,compute_result_dict
 from log.get_logger import get_logger
 from utils.relation_template import *
-from prepare_data.dataset import MRC4TPLinkerDataset
+from prepare_data.dataset import MRC4TPLinkerDataset,FilterDataset
 
 def set_seed(seed):
     random.seed(seed)
@@ -39,63 +39,77 @@ def set_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
-def load_data(config):
+def load_data(config,use_dev=True,use_test=True):
     # print(config.model)
     if(config.model=="mrc4ere"):
         print("MRCProcess")
         data_processor = MRCProcessor()
+    elif(config.model=='filter'):
+        data_processor=FilterDataset()
     else:
         print("MRC4TPLinkerDataset")
         data_processor=MRC4TPLinkerDataset()
 
     # load data exampels
     logger.info("loading {} ...".format(config.train_file))
-    train_examples = data_processor.get_train_examples(config.train_file)
+    train_examples = data_processor.get_train_examples(config.train_file,unused=config.unused_flag)
     logger.info("{} train examples load sucessful.".format(len(train_examples)))
 
     logger.info("loading {} ...".format(config.dev_file))
-    dev_examples = data_processor.get_test_examples(config.dev_file)
+    dev_examples = data_processor.get_test_examples(config.dev_file,unused=config.unused_flag)
     logger.info("{} dev examples load sucessful.".format(len(dev_examples)))
 
     logger.info("loading {} ...".format(config.test_file))
-    test_examples = data_processor.get_test_examples(config.test_file)
+    test_examples = data_processor.get_test_examples(config.test_file,unused=config.unused_flag)
     logger.info("{} test examples load sucessful.".format(len(test_examples)))
 
     label_list = data_processor.get_labels([train_examples, dev_examples, test_examples])
-    print(label_list)
+    logger.info(label_list)
     tokenizer = BertTokenizer.from_pretrained(config.bert_model, do_lower_case=True)
-    if(config.model=='mrc4ere'):
+    # if(config.model=='mrc4ere'):
+    #     # convert data example into featrues
+    #     ent_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+    #                                                   config.max_query_length, config.doc_stride,type="entity")
+    #     # convert data example into featrues
+    #     rel_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+    #                                                   config.max_query_length, config.doc_stride,type="relation")
+    #     if(use_dev):
+    #         dev_features = convert_examples_to_features(dev_examples, tokenizer, label_list, config.max_seq_length,
+    #                                                     config.max_query_length, config.doc_stride)
+    #     else:
+    #         dev_features = []
+    #     if(use_test):
+    #         test_features = convert_examples_to_features(test_examples, tokenizer, label_list, config.max_seq_length,
+    #                                                  config.max_query_length, config.doc_stride,type="entity")
+    #     else:
+    #         test_features = []
+    # else:#mrctplink
         # convert data example into featrues
-        ent_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
-                                                      config.max_query_length, config.doc_stride,type="entity")
-        # convert data example into featrues
-        rel_train_features = convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
-                                                      config.max_query_length, config.doc_stride,type="relation")
-        dev_features = convert_examples_to_features(dev_examples, tokenizer, label_list, config.max_seq_length,
-                                                    config.max_query_length, config.doc_stride)
-        test_features = convert_examples_to_features(test_examples, tokenizer, label_list, config.max_seq_length,
-                                                     config.max_query_length, config.doc_stride,type="entity")
-    else:#mrctplink
-        # convert data example into featrues
-        ent_train_features = data_processor.convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
-                                                          config.max_query_length, config.doc_stride, type="entity")
-        # convert data example into featrues
-        rel_train_features = data_processor.convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
-                                                          config.max_query_length, config.doc_stride, type="relation")
+    ent_train_features = data_processor.convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+                                                      config.max_query_length, config.doc_stride, type="entity")
+    # convert data example into featrues
+    rel_train_features = data_processor.convert_examples_to_features(train_examples, tokenizer, label_list, config.max_seq_length,
+                                                      config.max_query_length, config.doc_stride, type="relation")
+    if (use_dev):
         dev_features = data_processor.convert_examples_to_features(dev_examples, tokenizer, label_list, config.max_seq_length,
-                                                    config.max_query_length, config.doc_stride)
+                                                config.max_query_length, config.doc_stride)
+    else:
+        dev_features = []
+    if (use_test):
         test_features = data_processor.convert_examples_to_features(test_examples, tokenizer, label_list, config.max_seq_length,
-                                                         config.max_query_length, config.doc_stride, type="entity")
-    # print(rel_train_features[0])
+                                                     config.max_query_length, config.doc_stride, type="entity")
+    else:
+        test_features = []
+
     print(len(ent_train_features),len(rel_train_features),len(dev_features),len(test_features))
     num_train_steps = int(len(train_examples) / config.train_batch_size * config.epochs)
     return data_processor,tokenizer, ent_train_features,rel_train_features, dev_features, test_features, num_train_steps, label_list
 
 
-def load_model(config, num_train_steps, label_list,rel_labels):
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+def load_model(config, num_train_steps, label_list,rel_labels,gpu_num=0):
+    device = torch.device("cuda:{}".format(gpu_num)) if torch.cuda.is_available() else torch.device("cpu")
     # device=torch.device("cpu")
-    n_gpu = 1#torch.cuda.device_count()
+    n_gpu = 1#torch.cuda.device_count()#1#
     model = BertTagger(config, num_labels=len(label_list),device=device,pool_output=config.pool_output,num_rel_labels=len(rel_labels))
     model.to(device)
     if n_gpu > 1:
@@ -132,6 +146,7 @@ def warmup_linear(x, warmup=0.002):
 def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, dev_features, test_features, config,
           device, n_gpu, label_list, num_train_steps,eval_train=False,eval_test=True,eval_dev=False,begepoch=0,data_processor=None):
     writer = tb.SummaryWriter(config.tb_log_dir)
+    unused = config.unused_flag
     global_step = 0
     nb_tr_steps = 0
     tr_loss = 0
@@ -234,7 +249,19 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                 batch_i, lr_this_step, loss.item())
             tqdm_num_batches.set_postfix_str(postfix_str)
 
-
+            if(batch_i!=0 and batch_i%3000==0):
+                output_model_dir = os.path.join(config.output_dir, config.dataname, "{}".format(id))
+                if (not os.path.exists(output_model_dir)):
+                    os.makedirs(output_model_dir)
+                    config.copy_config(output_model_dir, "default.cfg")
+                if config.export_model:
+                    output_model_file = os.path.join(output_model_dir, "epoch{}_batch{}_bert_model.bin".format(idx,batch_i))
+                    torch.save(model_to_save.state_dict(), output_model_file)
+                    logger.info("save in " + output_model_file)
+                    try:
+                        os.remove(os.path.join(output_model_dir, "epoch{}_batch{}_bert_model.bin".format(idx,batch_i-3000)))
+                    except:
+                        pass
 
 
 
@@ -271,7 +298,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
         output_model_dir = os.path.join(config.output_dir, config.dataname, "{}".format(id))
         if (not os.path.exists(output_model_dir)):
             os.makedirs(output_model_dir)
-            config.copy_config(output_model_dir + "/default.cfg")
+            config.copy_config(output_model_dir, "default.cfg")
         if config.export_model:
             output_model_file = os.path.join(output_model_dir, "epoch{}_bert_model.bin".format(idx))
             torch.save(model_to_save.state_dict(), output_model_file)
@@ -285,7 +312,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                                                                                                      config, device, n_gpu,
                                                                                                      label_list,
                                                                                                      eval_sign="train",tokenizer=tokenizer,rel_features=rel_train_features,
-                                                                                                                              data_processor=data_processor)
+                                                                                                                              data_processor=data_processor,unused=unused)
 
             logger.info("ent_weight: {}".format(ent_weight))
             logger.info("rel_weight: {}".format(rel_weight))
@@ -307,7 +334,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             tmp_dev_loss, tmp_dev_entity, tmp_dev_relation, dev_ent_weight, dev_rel_weight = eval_checkpoint(model, dev_features,
                                                                                                      config, device, n_gpu,
                                                                                                      label_list,
-                                                                                                     eval_sign="dev",ent_weight=ent_weight,rel_weight=rel_weight,data_processor=data_processor)
+                                                                                                     eval_sign="dev",ent_weight=ent_weight,rel_weight=rel_weight,data_processor=data_processor,unused=unused)
             if (not config.use_train_weight):
                 ent_weight, rel_weight = dev_ent_weight, dev_rel_weight
                 logger.info("ent_weight: {}".format(ent_weight))
@@ -333,7 +360,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             logger.info("TEST:")
 
             _, tmp_test_entity, tmp_test_relation = eval_checkpoint(model, test_features, config, device, n_gpu,
-                                                                    label_list, "test", tokenizer, ent_weight, rel_weight,data_processor=data_processor)
+                                                                    label_list, "test", tokenizer, ent_weight, rel_weight,data_processor=data_processor,unused=unused)
             # writer.add_scalar("dev_loss", tmp_dev_loss.item(), num_batches * idx)
             writer.add_scalar("test_entf1", tmp_test_entity["f1"], num_batches * idx)
             writer.add_scalar("test_relf1", tmp_test_relation["f1"], num_batches * idx)
@@ -375,6 +402,8 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                 test_best_precision = [idx,test_ent_pcs, test_rel_pcs]
             if (test_best_recall[1] < test_ent_recall and test_best_recall[2] < test_rel_recall):
                 test_best_recall = [idx,test_ent_recall, test_rel_recall]
+            logger.info("{} all_best: {}, {}, {}, {}".format(id,test_best_precision, test_best_recall, test_best_f1,
+                                                          test_best_acc))
         # if(idx-test_best_f1[0]>3):
         #     logger.info("early_stopping!!")
         #     break
@@ -402,7 +431,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     logger.info("=&=" * 15)
 
     with open(config.result_dir+'log','a',encoding='utf-8') as f:
-        r_list=[id,test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+        r_list=[id,'',test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
                   test_best_ent_acc,test_best_rel_precision, test_best_rel_recall, test_best_rel_f1,
                   test_best_rel_acc,test_best_precision, test_best_recall, test_best_f1,
                   test_best_acc]
@@ -414,7 +443,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     return  output_model_file
 
 def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_list, eval_sign="dev", tokenizer=None,
-                    ent_weight=[1, 1, 1], rel_weight=[1, 1, 1],rel_features=[],data_processor=None):
+                    ent_weight=[1, 1, 1], rel_weight=[1, 1, 1],rel_features=[],data_processor=None,unused=False):
     if eval_sign == "dev":
         loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst,doc_id_lst = evaluate(
             model_object,
@@ -485,13 +514,13 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
         relation_examples = generate_relation_examples(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst,
                                                        ent_gold_lst, ent_label_mask_lst, ent_etype_lst,
                                                        ent_gold_relation, label_list, config, tokenizer,
-                                                       ent_weight,rel_logits_lst,logger=logger)  # batch x 3 x max_seq_len
-        if(config.model=='mrc4ere'):
-            relation_features = convert_examples_to_features(relation_examples, tokenizer, label_list,
-                                                             config.max_seq_length, config.max_query_length,
-                                                             config.doc_stride)
-        else:
-            relation_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
+                                                       ent_weight,rel_logits_lst,logger=logger,unused=unused)  # batch x 3 x max_seq_len
+        # if(config.model=='mrc4ere'):
+        #     relation_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
+        #                                                      config.max_seq_length, config.max_query_length,
+        #                                                      config.doc_stride)
+        # else:
+        relation_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
                                                              config.max_seq_length, config.max_query_length,
                                                              config.doc_stride)
 
@@ -559,14 +588,14 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
             relation_examples = generate_relation_examples(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst,
                                                            ent_gold_lst, ent_label_mask_lst, ent_etype_lst,
                                                            ent_gold_relation, label_list, config, tokenizer,
-                                                           ent_weight,rel_logits_lst,logger=logger)  # batch x 3 x max_seq_len
-            if (config.model == 'mrc4ere'):
-                # print(relation_examples)
-                rel_features = convert_examples_to_features(relation_examples, tokenizer, label_list,
-                                                                 config.max_seq_length, config.max_query_length,
-                                                                 config.doc_stride)
-            else:
-                rel_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
+                                                           ent_weight,rel_logits_lst,logger=logger,unused=unused)  # batch x 3 x max_seq_len
+            # if (config.model == 'mrc4ere'):
+            #     # print(relation_examples)
+            #     rel_features = convert_examples_to_features(relation_examples, tokenizer, label_list,
+            #                                                      config.max_seq_length, config.max_query_length,
+            #                                                      config.doc_stride)
+            # else:
+            rel_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
                                                             config.max_seq_length, config.max_query_length,
                                                             config.doc_stride)
 
@@ -658,8 +687,7 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
         doc_token_lst += doc_tokens
         doc_id_lst+=doc_ids
         eval_steps += 1
-        # if(batch_i==10):
-        #     break
+
 
 
     if(relation_flag):
@@ -681,7 +709,7 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
 
 def predict(tokenizer, model, ent_train_features,rel_train_features, dev_features, test_features, config,
           device, n_gpu, label_list,ent_weight=[1.0]*3,rel_weight=[1.0]*3,eval_train=True,eval_test=True,eval_dev=True,data_processor=None):
-
+    unused=config.unused_flag
     if(eval_train):
         # print(len(ent_train_features),len(rel_train_features))
         with open("test.txt", 'a', encoding='utf-8') as f:
@@ -691,13 +719,13 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
                 model, ent_train_features,
                 config, device, n_gpu,
                 label_list,
-                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features,data_processor=data_processor)
+                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features,data_processor=data_processor,unused=unused)
         else:
             tmp_train_loss, tmp_train_entity, tmp_train_relation,ent_weight, rel_weight, rel_train_features1 = eval_checkpoint(
                 model, ent_train_features,
                 config, device, n_gpu,
                 label_list,
-                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features,data_processor=data_processor)
+                eval_sign="train", tokenizer=tokenizer, rel_features=rel_train_features,data_processor=data_processor,unused=unused)
         logger.info("ent_weight: {}".format(ent_weight))
         logger.info("rel_weight: {}".format(rel_weight))
         logger.info("loss: {}".format(tmp_train_loss))
@@ -716,7 +744,7 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
                                                                                label_list,
                                                                                eval_sign="dev", ent_weight=ent_weight,
                                                                                rel_weight=rel_weight,tokenizer=tokenizer,
-                                                                                data_processor=data_processor)
+                                                                                data_processor=data_processor,unused=unused)
 
         if(not config.use_train_weight):
             ent_weight,rel_weight=dev_ent_weight, dev_rel_weight
@@ -734,7 +762,7 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
             f.write("......" * 10+"TEST"+"......" * 10+'\n')
         _, tmp_test_entity, tmp_test_relation = eval_checkpoint(model, test_features, config, device, n_gpu,
                                                                 label_list, "test", tokenizer, ent_weight,
-                                                                rel_weight,data_processor=data_processor)
+                                                                rel_weight,data_processor=data_processor,unused=unused)
 
 
         test_ent_acc, test_ent_pcs, test_ent_recall, test_ent_f1 = tmp_test_entity["accuracy"], tmp_test_entity[
@@ -752,10 +780,17 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
             "relation: acc={}, precision={}, recall={}, f1={}".format(test_rel_acc, test_rel_pcs, test_rel_recall,
                                                                       test_rel_f1))
         logger.info("")
+    with open(os.path.join(config.output_dir, config.dataname,"{}".format(id),"predict_log"),'a',encoding='utf-8') as f:
+        with open("../log/log_output_vote_token/predict_log-{}".format(id),'r',encoding='utf-8') as f1:
+            f.write(f1.read())
 
-def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_old_model=False,begepoch=0):
-
+def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_old_model=False,begepoch=-1,name='',gpu_num=1):
+    logger.info("{} loading config_file {}...".format(id,args.config_file))
     config = Configurable(args.config_file, extra_args, logger)
+
+    if(len(name)!=0):
+        config.set_dev_file('/'.join(config.dev_file.split('/')[:-1])+'/dev_{}.json'.format(name))
+        config.set_test_file('/'.join(config.dev_file.split('/')[:-1]) + '/test_{}.json'.format(name))
     set_seed(config.seed)
     if (config.dataname == 'conll04'):
         rel_label_list = conll04_rel_label_list
@@ -764,8 +799,8 @@ def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_o
         if (config.use_filter_flag == 2):
             rel_label_list = ace2005_rel_tail_label_list
     data_processor,tokenizer, ent_train_loader, rel_train_loader, dev_loader, test_loader, num_train_steps, label_list = load_data(
-        config)
-    model, optimizer, device, n_gpu = load_model(config, num_train_steps, label_list, rel_label_list)
+        config,use_dev=eval_dev,use_test=eval_test)
+    model, optimizer, device, n_gpu = load_model(config, num_train_steps, label_list, rel_label_list,gpu_num=gpu_num)
     output_model_file = ""
     if(use_old_model):
         predict_model_path = os.path.join(config.output_dir, config.dataname, "{}".format(id),
@@ -822,68 +857,107 @@ def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_o
                 n_gpu, label_list, eval_train=eval_train, eval_test=eval_test, eval_dev=eval_dev,data_processor=data_processor)
 
 if __name__ == "__main__":
+
     dt = datetime.now()
     id = dt.strftime("%Y%m%d-%H%M%S")
     index=[0,0]
-    # use_old_model=not False
-    use_old_model=False
-    dataset = ['conll04', 'ace2005'][index[0]]
+    gpu_num=1
+    use_old_model=True
+    # use_old_model=False
+
+    dataset = ['conll04', 'ace2005','conll04_orig'][index[0]]
     # id='predict_20210108-101550'
-    model = ['default', 'mrctp'][index[1]]
+    model = ['default', 'filter','mrctp'][index[1]]
     if(use_old_model):
-        config_file = ''
+        config_file =''
+        text=''
         flag = [True] * 4
-        # id='20210114-104820'#59
-        # begepoch = 0
-        # id='20210113-154131'#13
-        # begepoch =10
-        #conll04:mymrc4ere
-        # id='20210114-165645'#['[CLS]','[SEP]','S','E','O','B','I']
-        # begepoch=14#
-        # config_file ='../ckpt/{}/{}/default.cfg'.format(dataset,id)
-        # # config_file='../configs/{}_{}_spo.cfg'.format(model,dataset)
-        # # print(config_file)
-        # # onfig_file = '../configs/{}_{}_epo.cfg'.format(dataset, model)
-        # # onfig_file = '../configs/{}_{}_normal.cfg'.format(dataset, model)
-        # flag[2] = not flag[2]
+        # # id='20210114-104820'#59
+        # # begepoch = 0
+        # # id='20210113-154131'#13
+        # # begepoch =10
+        #
+        #
+        # #conll04:mymrc4ere
+        # id='20210115-161838'#['[CLS]','[SEP]','S','E','O','B','I']
+        # begepoch=18#
+        # text='predict_'
 
-        id='20210114-113954'#ace2005，['[CLS]', '[SEP]', 'S', 'B', 'E', 'O', 'I']
-        text='predict'
-        begepoch=15
-        index = [1, 0]
-        dataset = ['conll04', 'ace2005'][index[0]]
-        model = ['default', 'mrctp'][index[1]]
+        # id='20210117-143410'
+        # begepoch=14
+        # text='predict_'
+        #
+        # # flag[2] = not flag[2]
+        # id='20210118-154811'
+        # text=''
+        # begepoch=2
+        #
+        #
+
+        # id='20210119-213818'
+        # text=''
+        # begepoch=0
+        # flag[2]=False
+
+        id = '20210119-172230'
+        text = 'predict_'
+        begepoch = 5
+        for begepoch in range(6,15):
+            logger = get_logger(id, text=text)
+            argparser = argparse.ArgumentParser()
+            argparser.add_argument('--config_file',
+                                   default='../ckpt/default/20210113-154850/{}/{}/{}default.cfg'.format(dataset, id,text))
+            args, extra_args = argparser.parse_known_args()
+            config_file = '../ckpt/{}/{}/{}default.cfg'.format(dataset, id,text)
+            if (len(config_file) > 0):
+                args.config_file = config_file
+            main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2], use_old_model=flag[3],
+                 begepoch=begepoch,gpu_num=gpu_num)
+            if(dataset=='conll04'):
+                names = ['spo', 'normal']
+                for name in names:
+                    main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2], use_old_model=flag[3],
+                         begepoch=begepoch,name=name,gpu_num=gpu_num)
+
+        # ace2005，['[CLS]', '[SEP]', 'S', 'B', 'E', 'O', 'I']
+        # id='20210115-155203'
+        # text='predict_'
+        # begepoch=14
+        #
+        # id='20210118-214840'
+        # text='predict_'
+        # begepoch=19
+        # index = [1, 0]
+        # dataset = ['conll04', 'ace2005'][index[0]]
+        # model = ['default', 'mrctp'][index[1]]
         # flag[0]=not flag[0]
-        # flag[1] = not flag[1]
+        # # flag[1] = not flag[1]
         # flag[2]=not flag[2]
-
-
-
-        logger = get_logger(id)
-        argparser = argparse.ArgumentParser()
-        argparser.add_argument('--config_file', default='../ckpt/default/20210113-154850/{}/{}/default.cfg'.format(dataset,id))
-        args, extra_args = argparser.parse_known_args()
-        if(len(config_file)>0):
-            args.config_file=config_file
-        main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],use_old_model=flag[3],begepoch=begepoch)
+        # logger = get_logger(id,text=text)
+        # argparser = argparse.ArgumentParser()
+        # argparser.add_argument('--config_file', default='../ckpt/{}/{}/{}default.cfg'.format(dataset,id,text))
+        # args, extra_args = argparser.parse_known_args()
+        # if(len(config_file)>0):
+        #     args.config_file=config_file
+        # main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],use_old_model=flag[3],begepoch=begepoch,gpu_num=gpu_num)
 
     else:
-
         logger = get_logger(id)
         argparser = argparse.ArgumentParser()
         argparser.add_argument('--config_file', default='../configs/{}_{}.cfg'.format(model,dataset))
-
         args, extra_args = argparser.parse_known_args()
         print(args.config_file)
-        main(id, args, extra_args,eval_train=True,eval_test=True,eval_dev=True)
-        args.config_file = '../configs/{}_{}_spo.cfg'.format(model,dataset)
-        main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
-        args.config_file = '../configs/{}_{}_epo.cfg'.format(model,dataset)
-        main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
-        args.config_file = '../configs/{}_{}_normal.cfg'.format(model,dataset)
-        main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False)
+        main(id, args, extra_args,eval_train=True,eval_test=True,eval_dev=False,gpu_num=gpu_num)
+        # args.config_file = '../configs/{}_{}_spo.cfg'.format(model,dataset)
+        # main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False,gpu_num=gpu_num)
+        # args.config_file = '../configs/{}_{}_epo.cfg'.format(model,dataset)
+        # main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False,gpu_num=gpu_num)
+        # args.config_file = '../configs/{}_{}_normal.cfg'.format(model,dataset)
+        # main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False,gpu_num=gpu_num)
     # id="predict_20210108-101550"
 
 #['[CLS]', '[SEP]', 'E', 'O', 'B', 'S', 'I']
-
+#20210117-181753,cls+my+MRC4ERE,13wxl2
+#20210117-143410 mrc4ere+orig+train_dev+avg,13wxl
+#20210115-155203 mrc4ere+cls+ace2005,59LJ
 # ACe2005,['[CLS]', '[SEP]', 'S', 'O', 'B', 'E', 'I']

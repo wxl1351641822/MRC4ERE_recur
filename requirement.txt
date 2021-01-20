@@ -1,0 +1,4 @@
+pytorch_pretrained_bert==0.6.1
+torch==1.7.1
+future==0.18.2
+tensorboard==2.4.0

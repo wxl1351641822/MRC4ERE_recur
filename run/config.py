@@ -15,8 +15,10 @@ class Configurable:
         config = SafeConfigParser()
         config.read(config_file)
 
+
         if extra_args:
             extra_args = { k[2:] : v for k, v in zip(extra_args[0::2], extra_args[1::2]) }
+
         for section in config.sections():
             for k, v in config.items(section):
                 if k in extra_args:
@@ -154,6 +156,19 @@ class Configurable:
     def use_train_weight(self):
         return self._config.getboolean('Run', 'use_train_weight')
 
+    @property
+    def loss_ent_weight(self):
+        if(self._config.has_option('Run', 'loss_ent_weight')):
+            return self._config.getfloat('Run', 'loss_ent_weight')
+        else:
+            return 0.5
+
+    @property
+    def loss_rel_weight(self):
+        if (self._config.has_option('Run', 'loss_rel_weight')):
+            return self._config.getfloat('Run', 'loss_rel_weight')
+        else:
+            return 0.5
 
     #
     @property
@@ -188,6 +203,13 @@ class Configurable:
         return self._config.get('Run', 'pool_output')
 
     @property
+    def filter_use_last_bert(self):
+        if (self._config.has_option('Run', 'filter_use_last_bert')):
+            return self._config.getboolean('Run', 'filter_use_last_bert')
+        else:
+            return False
+
+    @property
     def dataname(self):
         return self._config.get('Data', 'dataname')
 
@@ -201,7 +223,17 @@ class Configurable:
 
     @property
     def doc_stride(self):
-        return self._config.getint('Data', 'doc_stride')
+        return self._config.getint('Data', 'doc_stride')#
+
+    @property
+    def unused_flag(self):
+        if (self._config.has_option('Data', 'unused_flag')):
+            return self._config.getboolean('Data', 'unused_flag')
+        else:
+            return False
+
+
+
 
     @property
     def data_dir(self):
@@ -211,13 +243,22 @@ class Configurable:
     def train_file(self):
         return self._config.get('Data', 'train_file')
 
+
+
     @property
     def dev_file(self):
         return self._config.get('Data', 'dev_file')
 
+
+    def set_dev_file(self,dev_file):
+        self._config.set('Data', 'dev_file',dev_file)
+
     @property
     def test_file(self):
         return self._config.get('Data', 'test_file')
+
+    def set_test_file(self,test_file):
+        self._config.set('Data', 'test_file',test_file)
 
     @property
     def output_dir(self):
@@ -239,8 +280,14 @@ class Configurable:
     def predict_model_path(self):
         return self._config.get('Save', 'predict_model_path')
 
-    def copy_config(self,path):
-        self._config.write(open(path, "w", encoding="utf8"))
+    def copy_config(self,dir,path):
+        self._config.write(open(dir+'/'+path, "w", encoding="utf8"))
+        self._config.set('Run', 'predict','True')
+        self._config.set('Run', 'train', 'False')
+        self._config.write(open(dir + '/predict_' + path, "w", encoding="utf8"))
+        self._config.set('Run', 'predict', 'False')
+        self._config.set('Run', 'train','True')
+
 
 
 
@@ -251,3 +298,6 @@ if __name__ == "__main__":
     argparser.add_argument('--config_file', default='../configs/default.cfg')
     args, extra_args = argparser.parse_known_args()
     config = Configurable(args.config_file, extra_args)
+    print(config.dev_file)
+    config.set_dev_file('../datasets')
+    print(config.dev_file)

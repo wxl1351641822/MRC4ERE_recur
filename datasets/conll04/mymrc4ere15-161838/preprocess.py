@@ -341,7 +341,7 @@ class conll04PreProcess:
                     tail["beg"], tail["end"])
                 relations.append({"label": rel["rel_type"], "e1_ids": list(range(head["beg"], head["end"] + 1)),
                                   "e2_ids": list(range(tail["beg"], tail["end"] + 1)), "e1_type": head["type"],
-                                  "e2_type": tail["type"], "e1_text": head["entity"], "e2_text": tail["entity"]})
+                                  "e2_type": tail["type"], "e1_text": head["entity"], "e2_text": tail["entity"],"overlap":rel['overlap']})
                 # print(relations[-1])
 
             type = 'entity'
@@ -523,7 +523,7 @@ class conll04PreProcess:
             json.dump({"data": data}, f)
 
     def process(self):
-        conll04_origin_dir='../../../数据集/conll04/origin'
+        conll04_origin_dir= '../../../../数据集/conll04/origin'
         file_name=["train","dev","test"]
 
         for name in file_name:

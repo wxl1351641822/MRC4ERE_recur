@@ -21,6 +21,65 @@ from layers.bert_layernorm import BertLayerNorm
 # from layers.loss_func import *
 
 
+class BertFilter(nn.Module):
+    #关系分类器，仅有关系分类器
+    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
+        super(BertFilter, self).__init__()
+        self.num_labels = num_labels
+        self.num_ques = num_ques
+        self.num_rel_labels=num_rel_labels
+        self.device=device
+
+        bert_config = BertConfig.from_dict(config.bert_config)
+        self.use_filter=config.use_filter_flag
+        self.bert = BertModel(bert_config)
+        self.bert = self.bert.from_pretrained(config.bert_model, )
+        self.pool_output=pool_output
+        self.loss_ent_weight=config.loss_ent_weight#ent预测
+        self.loss_rel_weight=config.loss_rel_weight#rel筛选器
+
+        if config.bert_frozen == "true":
+            print("!-!" * 20)
+            print("Please notice that the bert grad is false")
+            print("!-!" * 20)
+            for param in self.bert.parameters():
+                param.requires_grad = False
+
+        self.hidden_size = config.hidden_size
+        self.max_seq_len = config.max_seq_length
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        # self.rel_classifier_list=[]
+        # for _ in range(self.num_rel_labels):
+        #     self.rel_classifier_list.appenSingleLinearClassifier(config.hidden_size, 2))
+        self.rel_classifier=SingleLinearClassifier(config.hidden_size, self.num_rel_labels)
+        # self.relation1 = nn.Linear(3*self.hidden_size, self.hidden_size)
+        # self.relation2 = nn.Linear(3 * self.hidden_size, self.hidden_size)
+        # self.relation3 = nn.Linear(3 * self.hidden_size, self.hidden_size)
+
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None,
+                labels=None,type_flag=None,rel_labels=None):
+        sequence_output = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)[0]
+        last_bert_layer = self.dropout(sequence_output)
+        m = nn.Sigmoid()
+        if(self.pool_output=='avg'):
+            pool_output=torch.mean(last_bert_layer,dim=1)
+        else:
+            pool_output = last_bert_layer[:, 0]
+        rel_logits = self.rel_classifier(pool_output).reshape(-1, 3, self.num_rel_labels)
+        rel_logits = m(torch.mean(rel_logits, dim=1))
+
+        if labels is not None:
+            loss_fct2 = nn.BCELoss()
+            active_rel=type_flag==1
+            active_rel_logits=rel_logits[active_rel]
+            active_rel_labels=rel_labels[active_rel]
+            # print(active_rel_logits.shape, active_rel_labels.shape)
+            loss = loss_fct2(active_rel_logits, active_rel_labels)
+            return loss,rel_logits
+
+        return rel_logits
+
 class BertTagger(nn.Module):
     def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
         super(BertTagger, self).__init__()
@@ -34,7 +93,9 @@ class BertTagger(nn.Module):
         self.bert = BertModel(bert_config)
         self.bert = self.bert.from_pretrained(config.bert_model, )
         self.pool_output=pool_output
-
+        self.loss_ent_weight=config.loss_ent_weight#ent预测
+        self.loss_rel_weight=config.loss_rel_weight#rel筛选器
+        self.filter_use_last_bert=config.filter_use_last_bert
         if config.bert_frozen == "true":
             print("!-!" * 20)
             print("Please notice that the bert grad is false")
@@ -79,7 +140,8 @@ class BertTagger(nn.Module):
         last_bert_layer = self.dropout(valid_output)
 
         logits = self.classifier(last_bert_layer) # batch*3, max_seq_len, n_class
-
+        if(self.filter_use_last_bert):
+            sequence_output=last_bert_layer
         m = nn.Sigmoid()
         if(self.pool_output=='avg'):
             pool_output=torch.mean(sequence_output,dim=1)
@@ -117,7 +179,7 @@ class BertTagger(nn.Module):
                 #         total+=1
                 #         loss2+=loss_fct2(rel_logits[i:i+1],rel_labels[i:i+1])
 
-                loss+=loss2
+                loss=self.loss_ent_weight*loss+self.loss_rel_weight*loss2
             logits = F.log_softmax(logits, dim=2)
             return loss,logits,rel_logits
         else:
