@@ -212,6 +212,13 @@ class Configurable:
         return self._config.get('Run', 'pool_output')
 
     @property
+    def before_relcls_avg(self):
+        if (self._config.has_option('Run', 'before_relcls_avg')):
+            return self._config.getboolean('Run', 'before_relcls_avg')
+        else:
+            return False
+
+    @property
     def filter_use_last_bert(self):
         if (self._config.has_option('Run', 'filter_use_last_bert')):
             return self._config.getboolean('Run', 'filter_use_last_bert')

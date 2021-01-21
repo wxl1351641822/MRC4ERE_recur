@@ -96,6 +96,7 @@ class BertTagger(nn.Module):
         self.loss_ent_weight=config.loss_ent_weight#ent预测
         self.loss_rel_weight=config.loss_rel_weight#rel筛选器
         self.filter_use_last_bert=config.filter_use_last_bert
+        self.before_relcls_avg=config.before_relcls_avg
         if config.bert_frozen == "true":
             print("!-!" * 20)
             print("Please notice that the bert grad is false")
@@ -147,8 +148,13 @@ class BertTagger(nn.Module):
             pool_output=torch.mean(sequence_output,dim=1)
         else:
             pool_output = sequence_output[:, 0]
-        rel_logits = self.rel_classifier(pool_output).reshape(-1, 3, self.num_rel_labels)
-        rel_logits = m(torch.mean(rel_logits, dim=1))
+        if(self.before_relcls_avg):
+            rel_logits=self.rel_classifier(torch.mean(pool_output.reshape(-1, 3, feat_dim),dim=1))
+            rel_logits=m(rel_logits)
+        else:
+            rel_logits = self.rel_classifier(pool_output).reshape(-1, 3, self.num_rel_labels)
+            rel_logits = m(torch.mean(rel_logits, dim=1))
+
 
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(ignore_index=0)

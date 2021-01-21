@@ -856,6 +856,7 @@ def main(id,args,extra_args,logger,eval_train=False,eval_test=True,eval_dev=Fals
             if("model" in dic):
                 if("now_best_test" in dic):
                     now_best_test = dic["now_best_test"]
+                    logger.info("last best test:"+str(now_best_test))
                 dic=dic["model"]
 
             model.load_state_dict(dic)
@@ -910,7 +911,7 @@ def main(id,args,extra_args,logger,eval_train=False,eval_test=True,eval_dev=Fals
     return test_result
 
 
-def experiment(id,flag,beg,end,gpu_num,dataset,text,model):
+def experiment(id,flag,beg,end,gpu_num,dataset,text,model,use_old_model):
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--config_file',
                            default='../ckpt/default/20210113-154850/{}/{}/{}default.cfg'.format(dataset, id, text))
@@ -943,7 +944,7 @@ def experiment(id,flag,beg,end,gpu_num,dataset,text,model):
     logger = get_logger(id, text=text)
     for begepoch in range(beg, end):
 
-        config_file = '../ckpt/{}/{}/{}default.cfg'.format(dataset.split('_')[0], id, text)
+        # config_file = '../ckpt/{}/{}/{}default.cfg'.format(dataset.split('_')[0], id, text)
         if (len(config_file) > 0):
             args.config_file = config_file
         test_result = main(id, args, extra_args, logger, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],
@@ -1004,13 +1005,15 @@ if __name__ == "__main__":
     dt = datetime.now()
     id = dt.strftime("%Y%m%d-%H%M%S")
     index=[0,0]
-    gpu_num=1
+    gpu_num=0
     beg,end=-1,0
     # use_old_model=True
     use_old_model=False
     text = ''
     config_file = ''
     flag = [True] * 4
+
+    index=[1,1]
 
     # # id='20210114-104820'#59
     # # begepoch = 0
@@ -1091,7 +1094,7 @@ if __name__ == "__main__":
 
     dataset = ['conll04', 'ace2005', 'conll04_orig'][index[0]]
     model = ['default', 'filter', 'mrctp'][index[1]]
-    experiment(id, flag, beg, end, gpu_num, dataset, text, model)
+    experiment(id, flag, beg, end, gpu_num, dataset, text, model,use_old_model)
 
 
 #['[CLS]', '[SEP]', 'E', 'O', 'B', 'S', 'I']
