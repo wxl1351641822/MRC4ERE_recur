@@ -110,7 +110,7 @@ def load_data(config,use_dev=True,use_test=True):
 def load_model(config, num_train_steps, label_list,rel_labels,gpu_num=0):
     device = torch.device("cuda:{}".format(gpu_num)) if torch.cuda.is_available() else torch.device("cpu")
     # device=torch.device("cpu")
-    n_gpu = 1#torch.cuda.device_count()#1#
+    n_gpu = torch.cuda.device_count()#1#
     model = BertTagger(config, num_labels=len(label_list),device=device,pool_output=config.pool_output,num_rel_labels=len(rel_labels))
     model.to(device)
     if n_gpu > 1:
@@ -1013,8 +1013,8 @@ if __name__ == "__main__":
     config_file = ''
     flag = [True] * 4
 
-    index=[1,1]
-
+    # index=[1,1]
+    index=[1,0]
     # # id='20210114-104820'#59
     # # begepoch = 0
     # # id='20210113-154131'#13
