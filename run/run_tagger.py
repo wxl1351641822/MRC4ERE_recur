@@ -132,7 +132,7 @@ def load_model(config, num_train_steps, label_list,rel_labels,gpu_num=0):
     return model, optimizer, device, n_gpu
 
 
-def adjust_learning_rate(optimizer, decay_rate=0.95):
+def adjust_learning_rate(optimizer, logger,decay_rate=0.95):
     for param_group in optimizer.param_groups:
         param_group['lr'] = param_group['lr'] * decay_rate
     logger.info("current learning rate" + str(param_group['lr']))
@@ -186,7 +186,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     model_to_save=model
     best_dev_epoch=0
     lr_this_step = config.learning_rate
-    for idx in range(begepoch+1,int(config.epochs)):
+    for idx in range(0,int(config.epochs)):
 
         if idx == 4:
             logger.info(idx)
@@ -195,7 +195,9 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
         nb_tr_examples, nb_tr_steps = 0, 0
         logger.info("#######" * 10)
         logger.info("EPOCH: " + str(idx))
-        adjust_learning_rate(optimizer)
+        adjust_learning_rate(optimizer,logger)
+        if(idx<=begepoch):
+            continue
         train_features=ent_train_features+rel_train_features
         num_example = len(train_features)
         num_batches = int(num_example / config.train_batch_size)
@@ -261,7 +263,16 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                     config.copy_config(output_model_dir, "default.cfg")
                 if config.export_model:
                     output_model_file = os.path.join(output_model_dir, "epoch{}_batch{}_bert_model.bin".format(idx,batch_i))
-                    torch.save(model_to_save.state_dict(), output_model_file)
+                    save_dict = {"model": model_to_save.state_dict(),
+                                 "now_best_test": (test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+                                                   test_best_ent_acc, test_best_rel_precision, test_best_rel_recall,
+                                                   test_best_rel_f1,
+                                                   test_best_rel_acc, test_best_precision, test_best_recall,
+                                                   test_best_f1,
+                                                   test_best_acc),
+
+                                 "train_indecies":train_indecies}
+                    torch.save(save_dict, output_model_file)
                     logger.info("save in " + output_model_file)
                     try:
                         os.remove(os.path.join(output_model_dir, "epoch{}_batch{}_bert_model.bin".format(idx,batch_i-3000)))
