@@ -10,11 +10,11 @@ from configparser import SafeConfigParser
 
 class Configurable:
 
-    def __init__(self, config_file, extra_args, logger):
+    def __init__(self, config_file, extra_args, logger,id):
 
         config = SafeConfigParser()
         config.read(config_file)
-
+        self.id=id
 
         if extra_args:
             extra_args = { k[2:] : v for k, v in zip(extra_args[0::2], extra_args[1::2]) }
@@ -38,7 +38,7 @@ class Configurable:
         bert_config_file = self._config.get('Bert', 'bert_config')
         with open(bert_config_file, "r", encoding='utf-8') as reader:
             self.bert_config_json = json.load(reader)
-
+        self.logger=logger
 
     @property
     def bert_model(self):

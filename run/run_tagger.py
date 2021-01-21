@@ -40,6 +40,7 @@ def set_seed(seed):
     torch.cuda.manual_seed(seed)
 
 def load_data(config,use_dev=True,use_test=True):
+    logger=config.logger
     # print(config.model)
     if(config.model=="mrc4ere"):
         print("MRCProcess")
@@ -144,7 +145,8 @@ def warmup_linear(x, warmup=0.002):
 
 
 def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, dev_features, test_features, config,
-          device, n_gpu, label_list, num_train_steps,eval_train=False,eval_test=True,eval_dev=False,begepoch=0,data_processor=None):
+          device, n_gpu, label_list, num_train_steps,eval_train=False,eval_test=True,eval_dev=False,begepoch=0,data_processor=None,now_best_test =0):
+    logger = config.logger
     writer = tb.SummaryWriter(config.tb_log_dir)
     unused = config.unused_flag
     global_step = 0
@@ -174,6 +176,9 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     test_best_recall = [0,0,0]
     test_best_f1 =[0,0,0]
     test_best_loss = 1000000000000000
+    if(now_best_test!=0):
+        test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,test_best_ent_acc, test_best_rel_precision, test_best_rel_recall,test_best_rel_f1,test_best_rel_acc, test_best_precision, test_best_recall, test_best_f1,test_best_acc=now_best_test
+
 
     model.train()
     step = 0
@@ -301,7 +306,11 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             config.copy_config(output_model_dir, "default.cfg")
         if config.export_model:
             output_model_file = os.path.join(output_model_dir, "epoch{}_bert_model.bin".format(idx))
-            torch.save(model_to_save.state_dict(), output_model_file)
+            save_dict={"model":model_to_save.state_dict(),"now_best_test":(test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+                  test_best_ent_acc,test_best_rel_precision, test_best_rel_recall, test_best_rel_f1,
+                  test_best_rel_acc,test_best_precision, test_best_recall, test_best_f1,
+                  test_best_acc)}
+            torch.save(save_dict, output_model_file)
             logger.info("save in " + output_model_file)
         ent_weight, rel_weight=[1.0]*3,[1.0]*3
         # print(len(ent_train_features),len(rel_train_features))
@@ -417,7 +426,13 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     # model_to_save = model
     output_model_file = os.path.join(config.output_dir, config.dataname,"{}".format(id),"best_bert_model.bin")
     if config.export_model:
-        torch.save(model_to_save.state_dict(), output_model_file)
+        save_dict = {"model": model_to_save.state_dict(),
+                     "now_best_test": (test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+                                       test_best_ent_acc, test_best_rel_precision, test_best_rel_recall,
+                                       test_best_rel_f1,
+                                       test_best_rel_acc, test_best_precision, test_best_recall, test_best_f1,
+                                       test_best_acc)}
+        torch.save(save_dict, output_model_file)
         logger.info("save in "+output_model_file)
 
     logger.info("TEST: loss={}".format(test_best_loss))
@@ -444,6 +459,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
 
 def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_list, eval_sign="dev", tokenizer=None,
                     ent_weight=[1, 1, 1], rel_weight=[1, 1, 1],rel_features=[],data_processor=None,unused=False):
+    logger = config.logger
     if eval_sign == "dev":
         loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst,doc_id_lst = evaluate(
             model_object,
@@ -605,6 +621,7 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
 
 
 def evaluate(model_object, eval_features, config, device, eval_sign="dev",relation_flag=True):
+    logger = config.logger
     model_object.eval()
 
     eval_loss = 0
@@ -709,6 +726,7 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
 
 def predict(tokenizer, model, ent_train_features,rel_train_features, dev_features, test_features, config,
           device, n_gpu, label_list,ent_weight=[1.0]*3,rel_weight=[1.0]*3,eval_train=True,eval_test=True,eval_dev=True,data_processor=None):
+    logger = config.logger
     unused=config.unused_flag
     if(eval_train):
         # print(len(ent_train_features),len(rel_train_features))
@@ -780,13 +798,15 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
             "relation: acc={}, precision={}, recall={}, f1={}".format(test_rel_acc, test_rel_pcs, test_rel_recall,
                                                                       test_rel_f1))
         logger.info("")
+        test_result=[tmp_test_entity,tmp_test_relation]
     with open(os.path.join(config.output_dir, config.dataname,"{}".format(id),"predict_log"),'a',encoding='utf-8') as f:
         with open("../log/log_output_vote_token/predict_log-{}".format(id),'r',encoding='utf-8') as f1:
             f.write(f1.read())
+    return test_result
 
-def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_old_model=False,begepoch=-1,name='',gpu_num=1):
+def main(id,args,extra_args,logger,eval_train=False,eval_test=True,eval_dev=False,use_old_model=False,begepoch=-1,name='',gpu_num=1):
     logger.info("{} loading config_file {}...".format(id,args.config_file))
-    config = Configurable(args.config_file, extra_args, logger)
+    config = Configurable(args.config_file, extra_args, logger,id)
 
     if(len(name)!=0):
         config.set_dev_file('/'.join(config.dev_file.split('/')[:-1])+'/dev_{}.json'.format(name))
@@ -802,12 +822,25 @@ def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_o
         config,use_dev=eval_dev,use_test=eval_test)
     model, optimizer, device, n_gpu = load_model(config, num_train_steps, label_list, rel_label_list,gpu_num=gpu_num)
     output_model_file = ""
+    now_best_test =0
     if(use_old_model):
         predict_model_path = os.path.join(config.output_dir, config.dataname, "{}".format(id),
                                            "epoch{}_bert_model.bin".format(begepoch))
         if (os.path.exists(predict_model_path)):
             logger.info("load {} ....".format(predict_model_path))
-            model.load_state_dict(torch.load(predict_model_path, map_location=device))
+            # dic=save_dict = {"model": model_to_save.state_dict(),
+            #          "now_best_test": (test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+            #                            test_best_ent_acc, test_best_rel_precision, test_best_rel_recall,
+            #                            test_best_rel_f1,
+            #                            test_best_rel_acc, test_best_precision, test_best_recall, test_best_f1,
+            #                            test_best_acc)}
+            dic=torch.load(predict_model_path, map_location=device)
+            if("model" in dic):
+                if("now_best_test" in dic):
+                    now_best_test = dic["now_best_test"]
+                dic=dic["model"]
+
+            model.load_state_dict(dic)
             # state_dict=model.state_dict()
             # for k,v in state_dict.items():
             #     logger.info(k)
@@ -832,7 +865,8 @@ def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_o
     if (config.train):
         output_model_file = train(tokenizer, model, optimizer, ent_train_loader, rel_train_loader, dev_loader,
                                   test_loader, config, device, n_gpu, label_list,
-                                  num_train_steps,eval_train=eval_train,eval_test=eval_test,eval_dev=eval_dev,begepoch=begepoch,data_processor=data_processor)
+                                  num_train_steps,eval_train=eval_train,eval_test=eval_test,eval_dev=eval_dev,begepoch=begepoch,data_processor=data_processor,now_best_test =now_best_test)
+    test_result=[]
     if (config.predict):
         # if(config.train):
         #     config.predict_model_path=output_model_file
@@ -853,101 +887,21 @@ def main(id,args,extra_args,eval_train=False,eval_test=True,eval_dev=False,use_o
             #     model.load_state_dict(torch.load(predict_model_path1, map_location=device))
             else:
                 logger.info("model is not exists...")
-        predict(tokenizer, model, ent_train_loader, rel_train_loader, dev_loader, test_loader, config, device,
+        test_result=predict(tokenizer, model, ent_train_loader, rel_train_loader, dev_loader, test_loader, config, device,
                 n_gpu, label_list, eval_train=eval_train, eval_test=eval_test, eval_dev=eval_dev,data_processor=data_processor)
+    return test_result
 
-if __name__ == "__main__":
 
-    dt = datetime.now()
-    id = dt.strftime("%Y%m%d-%H%M%S")
-    index=[0,0]
-    gpu_num=1
-    use_old_model=True
-    # use_old_model=False
-
-    dataset = ['conll04', 'ace2005','conll04_orig'][index[0]]
-    # id='predict_20210108-101550'
-    model = ['default', 'filter','mrctp'][index[1]]
-    if(use_old_model):
-        config_file =''
-        text=''
-        flag = [True] * 4
-        # # id='20210114-104820'#59
-        # # begepoch = 0
-        # # id='20210113-154131'#13
-        # # begepoch =10
-        #
-        #
-        # #conll04:mymrc4ere
-        # id='20210115-161838'#['[CLS]','[SEP]','S','E','O','B','I']
-        # begepoch=18#
-        # text='predict_'
-
-        # id='20210117-143410'
-        # begepoch=14
-        # text='predict_'
-        #
-        # # flag[2] = not flag[2]
-        # id='20210118-154811'
-        # text=''
-        # begepoch=2
-        #
-        #
-
-        # id='20210119-213818'
-        # text=''
-        # begepoch=0
-        # flag[2]=False
-
-        id = '20210119-172230'
-        text = 'predict_'
-        begepoch = 5
-        for begepoch in range(6,15):
-            logger = get_logger(id, text=text)
-            argparser = argparse.ArgumentParser()
-            argparser.add_argument('--config_file',
-                                   default='../ckpt/default/20210113-154850/{}/{}/{}default.cfg'.format(dataset, id,text))
-            args, extra_args = argparser.parse_known_args()
-            config_file = '../ckpt/{}/{}/{}default.cfg'.format(dataset, id,text)
-            if (len(config_file) > 0):
-                args.config_file = config_file
-            main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2], use_old_model=flag[3],
-                 begepoch=begepoch,gpu_num=gpu_num)
-            if(dataset=='conll04'):
-                names = ['spo', 'normal']
-                for name in names:
-                    main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2], use_old_model=flag[3],
-                         begepoch=begepoch,name=name,gpu_num=gpu_num)
-
-        # ace2005，['[CLS]', '[SEP]', 'S', 'B', 'E', 'O', 'I']
-        # id='20210115-155203'
-        # text='predict_'
-        # begepoch=14
-        #
-        # id='20210118-214840'
-        # text='predict_'
-        # begepoch=19
-        # index = [1, 0]
-        # dataset = ['conll04', 'ace2005'][index[0]]
-        # model = ['default', 'mrctp'][index[1]]
-        # flag[0]=not flag[0]
-        # # flag[1] = not flag[1]
-        # flag[2]=not flag[2]
-        # logger = get_logger(id,text=text)
-        # argparser = argparse.ArgumentParser()
-        # argparser.add_argument('--config_file', default='../ckpt/{}/{}/{}default.cfg'.format(dataset,id,text))
-        # args, extra_args = argparser.parse_known_args()
-        # if(len(config_file)>0):
-        #     args.config_file=config_file
-        # main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],use_old_model=flag[3],begepoch=begepoch,gpu_num=gpu_num)
-
+def experiment(id,flag,beg,end,gpu_num,dataset,text,model):
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--config_file',
+                           default='../ckpt/default/20210113-154850/{}/{}/{}default.cfg'.format(dataset, id, text))
+    args, extra_args = argparser.parse_known_args()
+    if (use_old_model):
+        config_file = '../ckpt/default/20210113-154850/{}/{}/{}default.cfg'.format(dataset, id, text)
     else:
-        logger = get_logger(id)
-        argparser = argparse.ArgumentParser()
-        argparser.add_argument('--config_file', default='../configs/{}_{}.cfg'.format(model,dataset))
-        args, extra_args = argparser.parse_known_args()
-        print(args.config_file)
-        main(id, args, extra_args,eval_train=True,eval_test=True,eval_dev=False,gpu_num=gpu_num)
+        config_file = '../configs/{}_{}.cfg'.format(model, dataset)
+
         # args.config_file = '../configs/{}_{}_spo.cfg'.format(model,dataset)
         # main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False,gpu_num=gpu_num)
         # args.config_file = '../configs/{}_{}_epo.cfg'.format(model,dataset)
@@ -955,6 +909,172 @@ if __name__ == "__main__":
         # args.config_file = '../configs/{}_{}_normal.cfg'.format(model,dataset)
         # main(id, args, extra_args,eval_train=False,eval_test=True,eval_dev=False,gpu_num=gpu_num)
     # id="predict_20210108-101550"
+    # logger = get_logger(id, text=text)
+    test_best_ent_acc = 0
+    test_best_rel_acc = 0
+    test_best_ent_precision = 0
+    test_best_ent_recall = 0
+    test_best_ent_f1 = 0
+    test_best_rel_precision = 0
+    test_best_rel_recall = 0
+    test_best_rel_f1 = 0
+    test_best_acc = [0, 0, 0]
+    test_best_precision = [0, 0, 0]
+    test_best_recall = [0, 0, 0]
+    test_best_f1 = [0, 0, 0]
+    logger = get_logger(id, text=text)
+    for begepoch in range(beg, end):
+
+        config_file = '../ckpt/{}/{}/{}default.cfg'.format(dataset.split('_')[0], id, text)
+        if (len(config_file) > 0):
+            args.config_file = config_file
+        test_result = main(id, args, extra_args, logger, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],
+                           use_old_model=flag[3],
+                           begepoch=begepoch, gpu_num=gpu_num)
+        if (dataset == 'conll04' and len(text)):
+            names = ['spo', 'normal']
+            for name in names:
+                main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],
+                     use_old_model=flag[3],
+                     begepoch=begepoch, name=name, gpu_num=gpu_num)
+        if (len(test_result) > 0):
+            idx = begepoch
+            tmp_test_entity, tmp_test_relation = test_result
+            test_ent_acc, test_ent_pcs, test_ent_recall, test_ent_f1 = tmp_test_entity["accuracy"], tmp_test_entity[
+                "precision"], \
+                                                                       tmp_test_entity["recall"], tmp_test_entity[
+                                                                           "f1"]
+            test_rel_acc, test_rel_pcs, test_rel_recall, test_rel_f1 = tmp_test_relation["accuracy"], \
+                                                                       tmp_test_relation[
+                                                                           "precision"], \
+                                                                       tmp_test_relation["recall"], \
+                                                                       tmp_test_relation["f1"]
+            test_best_ent_acc = test_ent_acc if test_best_ent_acc < test_ent_acc else test_best_ent_acc
+            test_best_ent_f1 = test_ent_f1 if test_best_ent_f1 < test_ent_f1 else test_best_ent_f1
+            test_best_ent_recall = test_ent_recall if test_best_ent_recall < test_ent_recall else test_best_ent_recall
+            test_best_ent_precision = test_ent_pcs if test_best_ent_precision < test_ent_pcs else test_best_ent_precision
+            test_best_rel_acc = test_rel_acc if test_best_rel_acc < test_rel_acc else test_best_rel_acc
+            test_best_rel_f1 = test_rel_f1 if test_best_rel_f1 < test_rel_f1 else test_best_rel_f1
+            test_best_rel_recall = test_rel_recall if test_best_rel_recall < test_rel_recall else test_best_rel_recall
+            test_best_rel_precision = test_rel_pcs if test_best_rel_precision < test_rel_pcs else test_best_rel_precision
+            if (test_best_acc[1] < test_ent_acc and test_best_acc[2] < test_rel_acc):
+                test_best_acc = [idx, test_ent_acc, test_rel_acc]
+            if (test_best_f1[1] < test_ent_f1 and test_best_f1[2] < test_rel_f1):
+                test_best_f1 = [idx, test_ent_f1, test_rel_f1]
+            if (test_best_precision[1] < test_ent_pcs and test_best_precision[2] < test_rel_pcs):
+                test_best_precision = [idx, test_ent_pcs, test_rel_pcs]
+            if (test_best_recall[1] < test_ent_recall and test_best_recall[2] < test_rel_recall):
+                test_best_recall = [idx, test_ent_recall, test_rel_recall]
+            logger.info(
+                "{} all_best: {}, {}, {}, {}".format(id, test_best_precision, test_best_recall, test_best_f1,
+                                                     test_best_acc))
+
+    if (len(test_result) > 0):
+        logger.info("current best precision, recall, f1, acc :")
+        logger.info(
+            "entity  : {}, {}, {}, {}".format(test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+                                              test_best_ent_acc))
+        logger.info(
+            "relation: {}, {}, {}, {}".format(test_best_rel_precision, test_best_rel_recall, test_best_rel_f1,
+                                              test_best_rel_acc))
+        logger.info("all_best: {}, {}, {}, {}".format(test_best_precision, test_best_recall, test_best_f1,
+                                                      test_best_acc))
+        logger.info("=&=" * 15)
+
+if __name__ == "__main__":
+
+    dt = datetime.now()
+    id = dt.strftime("%Y%m%d-%H%M%S")
+    index=[0,0]
+    gpu_num=1
+    beg,end=-1,0
+    # use_old_model=True
+    use_old_model=False
+    text = ''
+    config_file = ''
+    flag = [True] * 4
+
+    # # id='20210114-104820'#59
+    # # begepoch = 0
+    # # id='20210113-154131'#13
+    # # begepoch =10
+    #
+    #
+    # #conll04:mymrc4ere
+    # id='20210115-161838'#['[CLS]','[SEP]','S','E','O','B','I']
+    # begepoch=18#
+    # text='predict_'
+
+    # id='20210117-143410'
+    # begepoch=14
+    # text='predict_'
+    #
+    # # flag[2] = not flag[2]
+    # id='20210118-154811'
+    # text=''
+    # begepoch=2
+    #
+    #
+
+    # id='20210119-213818'
+    # text=''
+    # begepoch=0
+    # flag[2]=False
+    #
+    # id = '20210119-172230'
+    # text = 'predict_'
+    # # dataset = 'conll04_orig'
+    # index=[2,0]
+    # beg,end=16,20
+    # use_old_model = True
+
+    # id='20210119-213818'
+    # beg,end=15,16
+    # dataset='conll04'
+    # gpu_num=0
+
+    # ace2005，['[CLS]', '[SEP]', 'S', 'B', 'E', 'O', 'I']
+    # id='20210115-155203'
+    # text='predict_'
+    # begepoch=14
+    #
+    # id='20210118-214840'
+    # text='predict_'
+    # begepoch=19
+    # index = [1, 0]
+    # dataset = ['conll04', 'ace2005'][index[0]]
+    # model = ['default', 'mrctp'][index[1]]
+    # flag[0]=not flag[0]
+    # # flag[1] = not flag[1]
+    # flag[2]=not flag[2]
+
+    # id='20210119-152612'
+    # text = 'predict_'
+    # beg,end=0,1
+    # index=[1,0]
+    # flag[0]=not flag[0]
+    # # flag[1] = not flag[1]
+    # flag[2]=not flag[2]
+
+    gpu_num=0
+    id = '20210120-083743'
+    text = ''
+    # dataset = 'conll04_orig'
+    index=[0,0]
+    beg,end=15,16
+    use_old_model = True
+
+    id = '20210120-124951'
+    text = ''
+    # dataset = 'conll04_orig'
+    index = [0, 0]
+    beg, end = 4,5
+    use_old_model = True
+
+    dataset = ['conll04', 'ace2005', 'conll04_orig'][index[0]]
+    model = ['default', 'filter', 'mrctp'][index[1]]
+    experiment(id, flag, beg, end, gpu_num, dataset, text, model)
+
 
 #['[CLS]', '[SEP]', 'E', 'O', 'B', 'S', 'I']
 #20210117-181753,cls+my+MRC4ERE,13wxl2
