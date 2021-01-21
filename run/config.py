@@ -39,6 +39,15 @@ class Configurable:
         with open(bert_config_file, "r", encoding='utf-8') as reader:
             self.bert_config_json = json.load(reader)
         self.logger=logger
+    def get_alllist(self):
+        lis=[]
+        klis=[]
+        for section in self._config.sections():
+            for k, v in  self._config.items(section):
+                lis.append(self._config.get(section,k))
+                klis.append(k)
+        return [klis,lis]
+
 
     @property
     def bert_model(self):

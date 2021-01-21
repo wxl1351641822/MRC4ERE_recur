@@ -466,7 +466,14 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     with open(os.path.join(config.output_dir, config.dataname,"{}".format(id),"log"),'a',encoding='utf-8') as f:
         with open("../log/log_output_vote_token/log-{}".format(id),'r',encoding='utf-8') as f1:
             f.write(f1.read())
-    return  output_model_file
+
+    with open(config.result_dir+'new_log','a',encoding='utf-8') as f:
+        # test_best_f1
+        f.write(','.join(['id','note','test_best_f1']+config.get_alllist()[0]))
+        r_list=[id,'','-'.join(test_best_f1)]+config.get_alllist()[1]
+        r_list=','.join([str(r) for r in r_list])
+        f.write(r_list+'\n')
+    return output_model_file
 
 def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_list, eval_sign="dev", tokenizer=None,
                     ent_weight=[1, 1, 1], rel_weight=[1, 1, 1],rel_features=[],data_processor=None,unused=False):
@@ -1067,20 +1074,20 @@ if __name__ == "__main__":
     # # flag[1] = not flag[1]
     # flag[2]=not flag[2]
 
-    gpu_num=0
-    id = '20210120-083743'
-    text = ''
-    # dataset = 'conll04_orig'
-    index=[0,0]
-    beg,end=15,16
-    use_old_model = True
-
-    id = '20210120-124951'
-    text = ''
-    # dataset = 'conll04_orig'
-    index = [0, 0]
-    beg, end = 4,5
-    use_old_model = True
+    # gpu_num=0
+    # id = '20210120-083743'
+    # text = ''
+    # # dataset = 'conll04_orig'
+    # index=[0,0]
+    # beg,end=15,16
+    # use_old_model = True
+    #
+    # id = '20210120-124951'
+    # text = ''
+    # # dataset = 'conll04_orig'
+    # index = [0, 0]
+    # beg, end = 4,5
+    # use_old_model = True
 
     dataset = ['conll04', 'ace2005', 'conll04_orig'][index[0]]
     model = ['default', 'filter', 'mrctp'][index[1]]
