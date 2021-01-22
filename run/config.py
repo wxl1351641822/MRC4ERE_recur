@@ -248,9 +248,6 @@ class Configurable:
         else:
             return False
 
-
-
-
     @property
     def data_dir(self):
         return self._config.get('Data', 'data_dir')
@@ -295,6 +292,28 @@ class Configurable:
     @property
     def predict_model_path(self):
         return self._config.get('Save', 'predict_model_path')
+
+    @property
+    def ent_matrix_label(self):
+        if (self._config.has_option('Mrctp', 'ent_matrix_label')):
+            return self._config.getboolean('Mrctp', 'ent_matrix_label')
+        else:
+            return False
+
+    @property
+    def rel_tail_head(self):
+        if (self._config.has_option('Mrctp', 'rel_tail_head')):
+            return self._config.get('Mrctp', 'rel_tail_head')
+        else:
+            return False
+
+    @property
+    def mix_ent_rel(self):
+        if(self._config.has_option('Mrctp', 'rel_tail_head')):
+            return self._config.get('Mrctp', 'mix_ent_rel')
+        else:
+            return False
+
 
     def copy_config(self,dir,path):
         self._config.write(open(dir+'/'+path, "w", encoding="utf8"))

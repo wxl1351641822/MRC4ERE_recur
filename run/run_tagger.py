@@ -49,7 +49,7 @@ def load_data(config,use_dev=True,use_test=True):
         data_processor=FilterDataset()
     else:
         print("MRC4TPLinkerDataset")
-        data_processor=MRC4TPLinkerDataset()
+        data_processor=MRC4TPLinkerDataset(config)
 
     # load data exampels
     logger.info("loading {} ...".format(config.train_file))
@@ -64,7 +64,7 @@ def load_data(config,use_dev=True,use_test=True):
     test_examples = data_processor.get_test_examples(config.test_file,unused=config.unused_flag)
     logger.info("{} test examples load sucessful.".format(len(test_examples)))
 
-    label_list = data_processor.get_labels([train_examples, dev_examples, test_examples])
+    label_list = data_processor.get_labels(config.dataname)
     logger.info(label_list)
     tokenizer = BertTokenizer.from_pretrained(config.bert_model, do_lower_case=True)
     # if(config.model=='mrc4ere'):
@@ -111,7 +111,11 @@ def load_model(config, num_train_steps, label_list,rel_labels,gpu_num=0):
     device = torch.device("cuda:{}".format(gpu_num)) if torch.cuda.is_available() else torch.device("cpu")
     # device=torch.device("cpu")
     n_gpu = torch.cuda.device_count()#1#
-    model = BertTagger(config, num_labels=len(label_list),device=device,pool_output=config.pool_output,num_rel_labels=len(rel_labels))
+    if(config.model=='mrc4ere'):
+        model = BertTagger(config, num_labels=len(label_list),device=device,pool_output=config.pool_output,num_rel_labels=len(rel_labels))
+    else:
+        model = MRCTPLinker(config, num_labels=len(label_list[1]), device=device, pool_output=config.pool_output,
+                           num_rel_labels=len(rel_labels))
     model.to(device)
     if n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -917,7 +921,7 @@ def experiment(id,flag,beg,end,gpu_num,dataset,text,model,use_old_model):
                            default='../ckpt/default/20210113-154850/{}/{}/{}default.cfg'.format(dataset, id, text))
     args, extra_args = argparser.parse_known_args()
     if (use_old_model):
-        config_file = '../ckpt/default/20210113-154850/{}/{}/{}default.cfg'.format(dataset, id, text)
+        config_file = '../ckpt/{}/{}/{}default.cfg'.format(dataset, id, text)
     else:
         config_file = '../configs/{}_{}.cfg'.format(model, dataset)
 
@@ -1013,8 +1017,13 @@ if __name__ == "__main__":
     config_file = ''
     flag = [True] * 4
 
+    index=[0,2]
+    # flag=[False,False,False,True]
+
     # index=[1,1]
-    index=[1,0]
+    # index=[1,0]
+
+
     # # id='20210114-104820'#59
     # # begepoch = 0
     # # id='20210113-154131'#13
@@ -1069,13 +1078,18 @@ if __name__ == "__main__":
     # # flag[1] = not flag[1]
     # flag[2]=not flag[2]
 
-    # id='20210119-152612'
+    id='20210119-152612'
+    gpu_num=1
     # text = 'predict_'
-    # beg,end=0,1
-    # index=[1,0]
-    # flag[0]=not flag[0]
-    # # flag[1] = not flag[1]
-    # flag[2]=not flag[2]
+    # use_old_model = True
+    text=''
+    use_old_model=False
+    beg,end=1,2
+    index=[1,0]
+    flag[0]=not flag[0]
+    # flag[1] = not flag[1]
+    flag[2]=not flag[2]
+
 
     # gpu_num=0
     # id = '20210120-083743'

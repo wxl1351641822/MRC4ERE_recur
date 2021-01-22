@@ -6,33 +6,34 @@ from .mrc_example import *
 from .mrc_processor import MRCProcessor
 from utils.relation_template import *
 class MRC4TPLinkerDataset(MRCProcessor):
-    def __init__(self):
-        MRCProcessor.__init__()
-        pass
+    def __init__(self,config):
+        MRCProcessor.__init__(self,)
+        self.datasets=config.dataname
+        self.ent_matrix_label=config.ent_matrix_label
+        self.rel_tail_head=config.rel_tail_head
+        self.mix_ent_rel=config.mix_ent_rel
 
-    def get_clip_labels(self,labels,orig_seq_len,seq_len):
-        results=[]
-        i=0
-        print(seq_len,orig_seq_len)
-        for row in range(orig_seq_len):
-            for col in range(row,orig_seq_len):
-                if(col<seq_len and row<seq_len):
-                    results.append(labels[i])
-                i+=1
-        return labels
+
+
+    def get_labels(self,datasets='conll04'):
+        rel_label=['[CLS]', '[SEP]','[E]','[+]','[-]','O']
+        if(self.ent_matrix_label):
+            ent_label=['[CLS]', '[SEP]','[E]','[+]','[-]','O']
+        else:
+            ent_label=['[CLS]', '[SEP]','E', 'O', 'B', 'S', 'I']
+
+        return [ent_label,rel_label]
 
     def convert_examples_to_features(self,examples, tokenizer, label_list, max_seq_length, max_query_length, doc_stride,
                                      type=None, max_ans_length=None):
         """Loads a data file into a list of `InputBatch`s."""
-        matrix_flag=True
-        if (max_ans_length is None):
-            matrix_flag=True
-            max_ans_length = max_seq_length
 
-        label_map = {label: i for i, label in enumerate(label_list)}
+        ent_label,rel_label=label_list
+        ent_label_map = {label: i for i, label in enumerate(ent_label)}
+        rel_label_map = {label: i for i, label in enumerate(rel_label)}
 
         features = []
-        for (ex_index, example) in enumerate(examples):
+        for (ex_index, example) in enumerate(tqdm(examples)):
             if (type is not None and example.q_type != type):
                 continue
             textlist = example.doc_tokens
@@ -66,16 +67,17 @@ class MRC4TPLinkerDataset(MRCProcessor):
             #     print(labels)
             #     print(labellist)
             input_features = []
-
-
-            label_ids = []
-            label_ids.append(label_map["[CLS]"])
-            label_ids.extend([label_map[l] for l in labels])
-            label_ids.append(label_map["[SEP]"])
-            label_mask = [1] * len(label_ids)
-            while len(label_ids) < max_ans_length:
-                label_ids.append(0)
-                label_mask.append(0)
+            label_ids=labellist
+            if(not self.ent_matrix_label and example.q_type=='entity'):
+                print(labels)
+                label_ids = []
+                label_ids.append(ent_label_map["[CLS]"])
+                label_ids.extend([ent_label_map[l] for l in labels])
+                label_ids.append(ent_label_map["[SEP]"])
+                label_mask = [1] * len(label_ids)
+                while len(label_ids) < max_seq_length:
+                    label_ids.append(0)
+                    label_mask.append(0)
 
             for q_idx, query in enumerate(example.question_text):
                 query_tokens = tokenizer.tokenize(query)
@@ -87,28 +89,18 @@ class MRC4TPLinkerDataset(MRCProcessor):
                     # labels = labels[0:max_doc_length]
                     doc_valid = doc_valid[0:max_doc_length]
                     # label_mask = label_mask[0:max_doc_length]
-                    orig_seq_len=len(textlist)
-                    seq_len=sum(doc_valid)
-                    if(matrix_flag):
-                        labels=self.get_clip_labels(labels,orig_seq_len,seq_len)
-                    else:
-                        labels=labels[:max_doc_length]
-                if (matrix_flag):
-                    label_ids = []
-                    label_ids.append(label_map["[CLS]"])
-                    label_ids.extend([label_map[l] for l in labels])
-                    label_ids.append(label_map["[SEP]"])
-                    label_mask = [1] * len(label_ids)
-                    while len(label_ids) < max_ans_length:
-                        label_ids.append(0)
-                        label_mask.append(0)
+                orig_seq_len=len(textlist)
+                if (self.ent_matrix_label or example.q_type == 'relation'):
+                    label_ids,label_mask = self.get_clip_labels(labellist, orig_seq_len, max_seq_length,rel_label_map)
+
+
 
                 ntokens = []
                 segment_ids = []
                 valid = []
                 ntokens.append("[CLS]")
                 segment_ids.append(0)
-                valid.append(1)  # [CLS] is valid
+                valid.append(0)  # [CLS] is valid
 
                 # add question_tokens
                 for i, token in enumerate(query_tokens):
@@ -129,7 +121,7 @@ class MRC4TPLinkerDataset(MRCProcessor):
                     #     label_ids.append(label_map[labels[i]])
                 ntokens.append("[SEP]")
                 segment_ids.append(1)
-                valid.append(1)
+                valid.append(0)
                 # label_mask.append(1) # attention_mask_label
                 # label_ids.append(label_map["[SEP]"])
                 # print(ntokens)
@@ -141,19 +133,13 @@ class MRC4TPLinkerDataset(MRCProcessor):
                     input_ids.append(0)
                     input_mask.append(0)
                     segment_ids.append(0)
-                    valid.append(1)
-                    # label_ids.append(0)
-                    # label_mask.append(0)
-                # while len(label_ids) < max_seq_length:
-                #     label_ids.append(0)
-                #     label_mask.append(0)
-                # print(len(label_mask))
+                    valid.append(0)
+
                 assert len(input_ids) == max_seq_length
                 assert len(input_mask) == max_seq_length
                 assert len(segment_ids) == max_seq_length
-                assert len(label_ids) == max_seq_length
                 assert len(valid) == max_seq_length
-                assert len(label_mask) == max_ans_length
+
 
                 input_features.append(
                     InputFeature(
@@ -181,6 +167,31 @@ class MRC4TPLinkerDataset(MRCProcessor):
             else:
                 print(example.doc_id, example)
         return features
+
+    def get_clip_labels(self,labels, orig_seq_len, seq_len,rel_label_map):
+        new_label=[]
+        label_mask=[]
+        i=0
+        if(orig_seq_len>=seq_len):
+            for row in range(orig_seq_len):
+                for col in range(row,orig_seq_len):
+                    if(col<seq_len):
+                        new_label.append(rel_label_map[labels[i]])
+                        label_mask.append(1)
+                    i += 1
+
+        else:
+            for row in range(seq_len):
+                for col in range(row,seq_len):
+
+                    if(col<orig_seq_len):
+                        new_label.append(rel_label_map[labels[i]])
+                        label_mask.append(1)
+                        i += 1
+                    else:
+                        new_label.append(0)
+                        label_mask.append(0)
+        return new_label,label_mask
 
 class FilterDataset:
     def __init__(self):
@@ -245,7 +256,7 @@ class FilterDataset:
             max_ans_length = max_seq_length
 
         features = []
-        for (ex_index, example) in enumerate(examples):
+        for (ex_index, example) in tqdm(enumerate(examples)):
             if (type is not None and example.q_type != type):
                 continue
             textlist = example.text_a

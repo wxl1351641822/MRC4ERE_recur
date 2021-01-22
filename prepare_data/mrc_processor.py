@@ -1,7 +1,7 @@
 import os
 import sys
 import csv
-
+from tqdm import tqdm
 from .mrc_utils import *
 from utils.relation_template import *
 
@@ -42,9 +42,10 @@ class MRCProcessor(DataProcessor):
         return test_examples
 
 
-    def get_labels(self, datasets):
+    def get_labels(self, datasets='ace2005'):
 
         label_list =['[CLS]', '[SEP]','E', 'O', 'B', 'S', 'I']
+
         # for dataset in datasets:
         #     for example in dataset:
         #         for tmp in list(set(example.label)):
@@ -73,7 +74,7 @@ class MRCProcessor(DataProcessor):
         label_map = {label: i for i, label in enumerate(label_list)}
 
         features = []
-        for (ex_index, example) in enumerate(examples):
+        for (ex_index, example) in enumerate(tqdm(examples)):
             if (type is not None and example.q_type != type):
                 # print(type,example.q_type)
                 continue

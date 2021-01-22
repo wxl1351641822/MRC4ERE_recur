@@ -73,9 +73,13 @@ def generate_mini_batch_input(all_features, mini_batch_idx, config):
     input_ids = input_ids.view(-1, config.max_seq_length)  # batch * 3, max_seq_length
     input_mask = input_mask.view(-1, config.max_seq_length)
     segment_ids = segment_ids.view(-1, config.max_seq_length)
-    label_ids = label_ids.view(-1, config.max_seq_length)
     valid_ids = valid_ids.view(-1, config.max_seq_length)
-    label_mask = label_mask.view(-1, config.max_seq_length)
+    if(config.model=='mrc4ere'):
+        max_len=config.max_seq_length
+    else:
+        max_len= config.max_seq_length*( config.max_seq_length+1)//2
+    label_ids = label_ids.view(-1, max_len)
+    label_mask = label_mask.view(-1, max_len)
     # print(valid_ids.shape,label_ids.shape,label_mask.shape)
     # label_mask = np.reshape(label_mask, (-1, config.max_seq_length))
 
