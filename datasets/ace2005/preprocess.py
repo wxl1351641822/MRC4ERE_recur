@@ -604,7 +604,7 @@ if __name__ == "__main__":
                         default="./")
     parser.add_argument("--pretrained_model_path",
                         default='/data/home/wuyuming/wxl/pretrained_models/bert-base-uncased')
-    parser.add_argument("--max_distance", type=int, default=-1,
+    parser.add_argument("--max_distance", type=int, default=45,
                         help="used to filter relations by distance from the head entity")
     parser.add_argument("--is_mq", type=bool, default=True,
                         help="多问题吗？")
