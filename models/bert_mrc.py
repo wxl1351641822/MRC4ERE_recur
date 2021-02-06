@@ -194,22 +194,22 @@ class BertTagger(nn.Module):
 
 
 class HandshakingKernel(nn.Module):
-    def __init__(self, hidden_size, shaking_type, inner_enc_type):
+    def __init__(self, hidden_size):
         super().__init__()
-        self.shaking_type = shaking_type
+        # self.shaking_type = shaking_type
 
         self.combine_fc = nn.Linear(hidden_size * 2, hidden_size)
 
 
-        self.inner_enc_type = inner_enc_type
-        if inner_enc_type == "mix_pooling":
-            self.lamtha = Parameter(torch.rand(hidden_size))
-        elif inner_enc_type == "lstm":
-            self.inner_context_lstm = nn.LSTM(hidden_size,
-                                              hidden_size,
-                                              num_layers=1,
-                                              bidirectional=False,
-                                              batch_first=True)
+        # self.inner_enc_type = inner_enc_type
+        # if inner_enc_type == "mix_pooling":
+        #     self.lamtha = Parameter(torch.rand(hidden_size))
+        # elif inner_enc_type == "lstm":
+        #     self.inner_context_lstm = nn.LSTM(hidden_size,
+        #                                       hidden_size,
+        #                                       num_layers=1,
+        #                                       bidirectional=False,
+        #                                       batch_first=True)
 
 
 
@@ -277,7 +277,8 @@ class MRCTPLinker(nn.Module):
         #     self.rel_classifier_list.appenSingleLinearClassifier(config.hidden_size, 2))
         self.rel_classifier=SingleLinearClassifier(config.hidden_size, self.num_rel_labels)
 
-        self.seq2matrix_fc=nn.Linear(config.max_seq_length,)
+        # self.seq2matrix_fc=nn.Linear(config.max_seq_length,)
+        self.hskernel=HandshakingKernel(self.hidden_size)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None,
                 labels=None, valid_ids=None, attention_mask_label=None,type_flag=None,rel_labels=None):
@@ -297,7 +298,9 @@ class MRCTPLinker(nn.Module):
                     valid_output[i][jj] = sequence_output[i][j]
         last_bert_layer = self.dropout(valid_output)
 
-        logits = self.classifier(last_bert_layer) # batch*3, max_seq_len, n_class
+        logits = self.hskernel(last_bert_layer) # batch*3, max_seq_len*(max_seq_len+1)/2, n_class
+        logits=self.classifier(logits)
+        # print(logits.shape)
         if(self.filter_use_last_bert):
             sequence_output=last_bert_layer
         m = nn.Sigmoid()
