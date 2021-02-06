@@ -226,6 +226,16 @@ class Configurable:
             return False
 
     @property
+    def lr_decay(self):
+        if (self._config.has_option('Run', 'lr_decay')):
+            return self._config.getfloat('Run', 'lr_decay')
+        else:
+            return 0.95
+
+
+
+
+    @property
     def dataname(self):
         return self._config.get('Data', 'dataname')
 
