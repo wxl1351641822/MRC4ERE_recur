@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.append("..")
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 import csv
@@ -23,12 +23,12 @@ from collections import defaultdict
 from prepare_data.data_utils import generate_mini_batch_input
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.optimization import BertAdam
-import torch.utils.tensorboard as tb
+# import torch.utils.tensorboard as tb
 
 from prepare_data.mrc_processor import MRCProcessor
-from models.bert_mrc import BertTagger
+from models.bert_mrc import BertTagger,MRCTPLinker
 # from prepare_data.mrc_utils import convert_relation_examples_to_features
-from utils.evaluate_funcs import compute_performance, generate_relation_examples, compute_performance_eachq,compute_result_dict
+from utils.evaluate_funcs import SeqEval,MRCTPlinkerEval
 from log.get_logger import get_logger
 from utils.relation_template import *
 from prepare_data.dataset import MRC4TPLinkerDataset,FilterDataset
@@ -108,17 +108,18 @@ def load_data(config,use_dev=True,use_test=True):
 
 
 def load_model(config, num_train_steps, label_list,rel_labels,gpu_num=0):
-    device = torch.device("cuda:{}".format(gpu_num)) if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     # device=torch.device("cpu")
-    n_gpu = 1#torch.cuda.device_count()#1#
+    n_gpu =2#torch.cuda.device_count()#1#
     if(config.model=='mrc4ere'):
         model = BertTagger(config, num_labels=len(label_list),device=device,pool_output=config.pool_output,num_rel_labels=len(rel_labels))
     else:
         model = MRCTPLinker(config, num_labels=len(label_list[1]), device=device, pool_output=config.pool_output,
                            num_rel_labels=len(rel_labels))
-    model.to(device)
+
     if n_gpu > 1:
-        model = torch.nn.DataParallel(model)
+        model = torch.nn.DataParallel(model,device_ids=[0,1],output_device=0)
+    model.to(device)
 
     param_optimizer = list(model.named_parameters())
 
@@ -151,7 +152,7 @@ def warmup_linear(x, warmup=0.002):
 def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, dev_features, test_features, config,
           device, n_gpu, label_list, num_train_steps,eval_train=False,eval_test=True,eval_dev=False,begepoch=0,data_processor=None,now_best_test =0):
     logger = config.logger
-    writer = tb.SummaryWriter(config.tb_log_dir)
+    # writer = tb.SummaryWriter(config.tb_log_dir)
     unused = config.unused_flag
     global_step = 0
     nb_tr_steps = 0
@@ -182,9 +183,10 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
     test_best_loss = 1000000000000000
     if(now_best_test!=0):
         test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,test_best_ent_acc, test_best_rel_precision, test_best_rel_recall,test_best_rel_f1,test_best_rel_acc, test_best_precision, test_best_recall, test_best_f1,test_best_acc=now_best_test
-
-
-    model.train()
+    if(n_gpu>1):
+        model.module.train()
+    else:
+        model.train()
     step = 0
     tb_loss = 0.0
     model_to_save=model
@@ -199,7 +201,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
         nb_tr_examples, nb_tr_steps = 0, 0
         logger.info("#######" * 10)
         logger.info("EPOCH: " + str(idx))
-        adjust_learning_rate(optimizer,logger)
+        adjust_learning_rate(optimizer,logger,decay_rate=config.lr_decay)
         if(idx<=begepoch):
             continue
         train_features=ent_train_features+rel_train_features
@@ -235,9 +237,9 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                 loss = loss.mean()
             tb_loss+=loss.item()
 
-            if(batch_i!=0 and batch_i%100==0):
-                writer.add_scalar("train_loss",tb_loss/100,num_batches*idx+batch_i)
-                tb_loss=0.0
+            # if(batch_i!=0 and batch_i%100==0):
+            #     writer.add_scalar("train_loss",tb_loss/100,num_batches*idx+batch_i)
+            #     tb_loss=0.0
             model.zero_grad()
             loss.backward()
             # nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=config.clip_grad)
@@ -267,6 +269,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                     config.copy_config(output_model_dir, "default.cfg")
                 if config.export_model:
                     output_model_file = os.path.join(output_model_dir, "epoch{}_batch{}_bert_model.bin".format(idx,batch_i))
+
                     save_dict = {"model": model_to_save.state_dict(),
                                  "now_best_test": (test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
                                                    test_best_ent_acc, test_best_rel_precision, test_best_rel_recall,
@@ -321,7 +324,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             config.copy_config(output_model_dir, "default.cfg")
         if config.export_model:
             output_model_file = os.path.join(output_model_dir, "epoch{}_bert_model.bin".format(idx))
-            save_dict={"model":model_to_save.state_dict(),"now_best_test":(test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+            save_dict={"model":model.state_dict() if(n_gpu<=1) else model.module.state_dict(),"now_best_test":(test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
                   test_best_ent_acc,test_best_rel_precision, test_best_rel_recall, test_best_rel_f1,
                   test_best_rel_acc,test_best_precision, test_best_recall, test_best_f1,
                   test_best_acc)}
@@ -343,14 +346,14 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             logger.info("loss: {}".format(tmp_train_loss))
             logger.info("tmp_train_entity: {}".format(tmp_train_entity))
             logger.info("tmp_train_relation: {}".format(tmp_train_relation))
-            writer.add_scalar("epoch_train_loss", tmp_train_loss, num_batches * idx)
-            for i in range(3):
-                writer.add_scalar("epoch_train_entf1{}".format(i), tmp_train_entity[i]["f1"], num_batches * idx)
-                writer.add_scalar("epoch_train_relf1{}".format(i), tmp_train_relation[i]["f1"], num_batches * idx)
-                writer.add_scalar("epoch_train_entr{}".format(i), tmp_train_entity[i]["recall"], num_batches * idx)
-                writer.add_scalar("epoch_train_relr{}".format(i), tmp_train_relation[i]["recall"], num_batches * idx)
-                writer.add_scalar("epoch_train_entp{}".format(i), tmp_train_entity[i]["precision"], num_batches * idx)
-                writer.add_scalar("epoch_train_relp{}".format(i), tmp_train_relation[i]["precision"], num_batches * idx)
+            # writer.add_scalar("epoch_train_loss", tmp_train_loss, num_batches * idx)
+            # for i in range(3):
+            #     writer.add_scalar("epoch_train_entf1{}".format(i), tmp_train_entity[i]["f1"], num_batches * idx)
+            #     writer.add_scalar("epoch_train_relf1{}".format(i), tmp_train_relation[i]["f1"], num_batches * idx)
+            #     writer.add_scalar("epoch_train_entr{}".format(i), tmp_train_entity[i]["recall"], num_batches * idx)
+            #     writer.add_scalar("epoch_train_relr{}".format(i), tmp_train_relation[i]["recall"], num_batches * idx)
+            #     writer.add_scalar("epoch_train_entp{}".format(i), tmp_train_entity[i]["precision"], num_batches * idx)
+            #     writer.add_scalar("epoch_train_relp{}".format(i), tmp_train_relation[i]["precision"], num_batches * idx)
         if(eval_dev):
             logger.info("......" * 10)
             logger.info("DEV")
@@ -366,18 +369,19 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             if(dev_best_loss>tmp_dev_loss):
                 best_dev_epoch=idx
                 dev_best_loss=tmp_dev_loss
-                model_to_save=model
+                model_to_save=model if(n_gpu<=1) else model.module
+
 
             logger.info("loss: {}".format( tmp_dev_loss))
             logger.info("tmp_dev_entity: {}".format(tmp_dev_entity))
             logger.info("tmp_dev_relation: {}".format(tmp_dev_relation))
-            writer.add_scalar("dev_loss", tmp_dev_loss, num_batches * idx)
-            writer.add_scalar("dev_entf1", tmp_dev_entity["f1"], num_batches * idx)
-            writer.add_scalar("dev_relf1", tmp_dev_relation["f1"], num_batches * idx)
-            writer.add_scalar("dev_entr", tmp_dev_entity["recall"], num_batches * idx)
-            writer.add_scalar("dev_relr", tmp_dev_relation["recall"], num_batches * idx)
-            writer.add_scalar("dev_entp", tmp_dev_entity["precision"], num_batches * idx)
-            writer.add_scalar("dev_relp", tmp_dev_relation["precision"], num_batches * idx)
+            # writer.add_scalar("dev_loss", tmp_dev_loss, num_batches * idx)
+            # writer.add_scalar("dev_entf1", tmp_dev_entity["f1"], num_batches * idx)
+            # writer.add_scalar("dev_relf1", tmp_dev_relation["f1"], num_batches * idx)
+            # writer.add_scalar("dev_entr", tmp_dev_entity["recall"], num_batches * idx)
+            # writer.add_scalar("dev_relr", tmp_dev_relation["recall"], num_batches * idx)
+            # writer.add_scalar("dev_entp", tmp_dev_entity["precision"], num_batches * idx)
+            # writer.add_scalar("dev_relp", tmp_dev_relation["precision"], num_batches * idx)
         if(eval_test):
 
             logger.info("......" * 10)
@@ -386,12 +390,12 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
             _, tmp_test_entity, tmp_test_relation = eval_checkpoint(model, test_features, config, device, n_gpu,
                                                                     label_list, "test", tokenizer, ent_weight, rel_weight,data_processor=data_processor,unused=unused)
             # writer.add_scalar("dev_loss", tmp_dev_loss.item(), num_batches * idx)
-            writer.add_scalar("test_entf1", tmp_test_entity["f1"], num_batches * idx)
-            writer.add_scalar("test_relf1", tmp_test_relation["f1"], num_batches * idx)
-            writer.add_scalar("test_entr", tmp_test_entity["recall"], num_batches * idx)
-            writer.add_scalar("test_relr", tmp_test_relation["recall"], num_batches * idx)
-            writer.add_scalar("test_entp", tmp_test_entity["precision"], num_batches * idx)
-            writer.add_scalar("test_relp", tmp_test_relation["precision"], num_batches * idx)
+            # writer.add_scalar("test_entf1", tmp_test_entity["f1"], num_batches * idx)
+            # writer.add_scalar("test_relf1", tmp_test_relation["f1"], num_batches * idx)
+            # writer.add_scalar("test_entr", tmp_test_entity["recall"], num_batches * idx)
+            # writer.add_scalar("test_relr", tmp_test_relation["recall"], num_batches * idx)
+            # writer.add_scalar("test_entp", tmp_test_entity["precision"], num_batches * idx)
+            # writer.add_scalar("test_relp", tmp_test_relation["precision"], num_batches * idx)
 
 
 
@@ -428,6 +432,20 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
                 test_best_recall = [idx,test_ent_recall, test_rel_recall]
             logger.info("{} all_best: {}, {}, {}, {}".format(id,test_best_precision, test_best_recall, test_best_f1,
                                                           test_best_acc))
+        output_model_dir = os.path.join(config.output_dir, config.dataname, "{}".format(id))
+        if (not os.path.exists(output_model_dir)):
+            os.makedirs(output_model_dir)
+            config.copy_config(output_model_dir, "default.cfg")
+        if config.export_model:
+            output_model_file = os.path.join(output_model_dir, "epoch{}_bert_model.bin".format(idx))
+            save_dict = {"model": model_to_save.state_dict(),
+                         "now_best_test": (test_best_ent_precision, test_best_ent_recall, test_best_ent_f1,
+                                           test_best_ent_acc, test_best_rel_precision, test_best_rel_recall,
+                                           test_best_rel_f1,
+                                           test_best_rel_acc, test_best_precision, test_best_recall, test_best_f1,
+                                           test_best_acc)}
+            torch.save(save_dict, output_model_file)
+            logger.info("save in " + output_model_file)
         # if(idx-test_best_f1[0]>3):
         #     logger.info("early_stopping!!")
         #     break
@@ -473,7 +491,7 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
 
     with open(config.result_dir+'new_log','a',encoding='utf-8') as f:
         # test_best_f1
-        f.write(','.join(['id','note','test_best_f1']+config.get_alllist()[0]))
+        # f.write(','.join(['id','note','test_best_f1']+config.get_alllist()[0]))
         r_list=[id,'','-'.join(test_best_f1)]+config.get_alllist()[1]
         r_list=','.join([str(r) for r in r_list])
         f.write(r_list+'\n')
@@ -482,16 +500,22 @@ def train(tokenizer, model, optimizer, ent_train_features,rel_train_features, de
 def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_list, eval_sign="dev", tokenizer=None,
                     ent_weight=[1, 1, 1], rel_weight=[1, 1, 1],rel_features=[],data_processor=None,unused=False):
     logger = config.logger
+
+    if(config.model=='mrctplink'):
+        myeval=MRCTPlinkerEval(label_list)
+    else:
+        myeval = SeqEval(label_list)
+
     if eval_sign == "dev":
-        loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst,doc_id_lst = evaluate(
+        loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst,doc_id_lst,valid_lst = evaluate(
             model_object,
             eval_features, config,
             device, eval_sign="dev")
 
 
         result_dict = defaultdict(dict)
-        eval_performance, eval_logs ,result_dict= compute_performance(doc_id_lst,input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst,
-                                                        label_mask_lst, type_lst,etype_lst, label_list, tokenizer, ent_weight,
+        eval_performance, eval_logs ,result_dict= myeval.compute_performance(doc_id_lst,input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst,
+                                                        label_mask_lst, type_lst,etype_lst, tokenizer, ent_weight,
                                                               rel_weight, result_dict=result_dict,gold_relation=gold_relation)
         with open('dev_result.txt','w',encoding='utf-8') as f:
             f.write(str(result_dict))
@@ -507,9 +531,9 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
                         fw.write("\t".join(["{:<20}".format(token), true_label, pred_label]) + '\n')
                     fw.write("\n")
         if(not config.use_train_weight):
-            eval_performance1, _, result_dict = compute_performance_eachq(doc_id_lst, input_lst, doc_token_lst,
+            eval_performance1, _, result_dict = myeval.compute_performance_eachq(doc_id_lst, input_lst, doc_token_lst,
                                                                          input_mask_lst, pred_lst, gold_lst,
-                                                                         label_mask_lst, type_lst, etype_lst, label_list,
+                                                                         label_mask_lst, type_lst, etype_lst,
                                                                          tokenizer=tokenizer, result_dict=result_dict,
                                                                          gold_relation=gold_relation)
             ent_p_list = np.array([ent_p["f1"] for ent_p in eval_performance1["entity"]])
@@ -525,16 +549,16 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
     elif eval_sign == "test" and tokenizer is not None:
         result_dict = defaultdict(dict)
         # evaluate head entity extraction
-        _, ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst, ent_gold_lst, ent_label_mask_lst, ent_type_lst, ent_etype_lst, ent_gold_relation,rel_logits_lst,doc_id_lst = evaluate(
+        _, ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst, ent_gold_lst, ent_label_mask_lst, ent_type_lst, ent_etype_lst, ent_gold_relation,rel_logits_lst,doc_id_lst,valid_lst = evaluate(
             model_object,
             eval_features,
             config,
             device,
             eval_sign="test")
 
-        entity_performance, entity_logs,result_dict = compute_performance(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst,
+        entity_performance, entity_logs,result_dict = myeval.compute_performance(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst,
                                                               ent_pred_lst, ent_gold_lst, ent_label_mask_lst,
-                                                              ent_type_lst,ent_etype_lst, label_list, tokenizer, ent_weight,
+                                                              ent_type_lst,ent_etype_lst,  tokenizer, ent_weight,
                                                               rel_weight, result_dict=result_dict,gold_relation=ent_gold_relation)
 
         best_rel_f1 = -1
@@ -549,9 +573,9 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
                     fw.write("\n")
 
         # generate relation question based on head entity
-        relation_examples = generate_relation_examples(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst,
+        relation_examples = myeval.generate_relation_examples(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst,
                                                        ent_gold_lst, ent_label_mask_lst, ent_etype_lst,
-                                                       ent_gold_relation, label_list, config, tokenizer,
+                                                       ent_gold_relation,  config, tokenizer,
                                                        ent_weight,rel_logits_lst,logger=logger,unused=unused)  # batch x 3 x max_seq_len
         # if(config.model=='mrc4ere'):
         #     relation_features = data_processor.convert_examples_to_features(relation_examples, tokenizer, label_list,
@@ -564,11 +588,11 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
 
         # evaluate tail entity extraction
         if len(relation_features) > 0:
-            _, rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst, rel_etype_lst, rel_gold_relation,rel_logits_lst,doc_id_lst = evaluate(
+            _, rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst, rel_etype_lst, rel_gold_relation,rel_logits_lst,doc_id_lst,valid_lst = evaluate(
                 model_object, relation_features, config, device, eval_sign="test",relation_flag=False)
-            relation_performance, relation_logs ,result_dict= compute_performance(doc_id_lst,rel_input_lst, rel_doc_lst, rel_input_mask_lst,
+            relation_performance, relation_logs ,result_dict= myeval.compute_performance(doc_id_lst,rel_input_lst, rel_doc_lst, rel_input_mask_lst,
                                                                       rel_pred_lst, rel_gold_lst, rel_label_mask_lst,
-                                                                      rel_type_lst, rel_etype_lst,label_list, tokenizer=tokenizer,result_dict=result_dict,gold_relation=rel_gold_relation)
+                                                                      rel_type_lst, rel_etype_lst, tokenizer=tokenizer,result_dict=result_dict,gold_relation=rel_gold_relation)
             with open('dev_result.txt', 'w', encoding='utf-8') as f:
                 f.write(str(result_dict))
             # compute_result_dict(result_dict)
@@ -590,7 +614,7 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
 
     elif eval_sign=='train' and tokenizer is not None:
         logger.info("开始计算train entity....")
-        loss, ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst, ent_gold_lst, ent_label_mask_lst, ent_type_lst, ent_etype_lst, ent_gold_relation,rel_logits_lst,doc_id_lst = evaluate(
+        loss, ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst, ent_gold_lst, ent_label_mask_lst, ent_type_lst, ent_etype_lst, ent_gold_relation,rel_logits_lst,doc_id_lst,valid_lst = evaluate(
             model_object,
             eval_features,
             config,
@@ -600,13 +624,13 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
         result_dict =defaultdict(dict)
         # input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst,
         # label_mask_lst, type_lst, label_listresult_dict={}
-        eval_performance, _,result_dict = compute_performance_eachq(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst, ent_gold_lst, ent_label_mask_lst, ent_type_lst, ent_etype_lst,label_list, tokenizer=tokenizer,result_dict=result_dict,gold_relation=ent_gold_relation)
+        eval_performance, _,result_dict = myeval.compute_performance_eachq(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst, ent_gold_lst, ent_label_mask_lst, ent_type_lst, ent_etype_lst, tokenizer=tokenizer,result_dict=result_dict,gold_relation=ent_gold_relation)
         ent_p_list = np.array([ent_p["f1"] for ent_p in eval_performance["entity"]])
         ent_weight = (np.exp(ent_p_list) / sum(np.exp(ent_p_list))) * len(ent_p_list)
         ent_eval_performance= eval_performance["entity"]
         logger.info("开始计算train rel....")
         if(len(rel_features)>0):
-            loss, rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst, rel_etype_lst,rel_gold_relation,_,rel_doc_id_lst = evaluate(
+            loss, rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst, rel_etype_lst,rel_gold_relation,_,rel_doc_id_lst,valid_lst = evaluate(
                 model_object,
                 rel_features,
                 config,
@@ -614,8 +638,8 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
                 eval_sign="train",
                 relation_flag=False)
 
-            eval_performance, _ ,result_dict= compute_performance_eachq(rel_doc_id_lst,rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst,ent_etype_lst,
-                                                            label_list, tokenizer=tokenizer,result_dict=result_dict,gold_relation=rel_gold_relation)
+            eval_performance, _ ,result_dict= myeval.compute_performance_eachq(rel_doc_id_lst,rel_input_lst, rel_doc_lst, rel_input_mask_lst, rel_pred_lst, rel_gold_lst, rel_label_mask_lst, rel_type_lst,ent_etype_lst,
+                                                            tokenizer=tokenizer,result_dict=result_dict,gold_relation=rel_gold_relation)
         else:
             print("no rel_features!")
         rel_p_list = np.array([rel_p["f1"] for rel_p in eval_performance["relation"]])
@@ -623,9 +647,9 @@ def eval_checkpoint(model_object, eval_features, config, device, n_gpu, label_li
         ent_weight, rel_weight = ent_weight.tolist(), rel_weight.tolist()
         # generate relation question based on head entity
         if(config.use_gen_rel):
-            relation_examples = generate_relation_examples(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst,
+            relation_examples = myeval.generate_relation_examples(doc_id_lst,ent_input_lst, ent_doc_lst, ent_input_mask_lst, ent_pred_lst,
                                                            ent_gold_lst, ent_label_mask_lst, ent_etype_lst,
-                                                           ent_gold_relation, label_list, config, tokenizer,
+                                                           ent_gold_relation, config, tokenizer,
                                                            ent_weight,rel_logits_lst,logger=logger,unused=unused)  # batch x 3 x max_seq_len
             # if (config.model == 'mrc4ere'):
             #     # print(relation_examples)
@@ -701,13 +725,14 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
         # print(num_gold,torch.sum(rel_labels).item(),rel_labels)
         # print(rel_labels,torch.sum(rel_labels).item(),num_gold)
         num_tp+=torch.sum((rel_logits+rel_labels)==2).item()
-
+        # print(valid_ids.shape,label_ids.shape,input_ids.shape)
         n_ques = int(input_ids.shape[0] / batch_size)
         input_ids = np.reshape(input_ids, (-1, n_ques, config.max_seq_length)).tolist()
         logits = np.reshape(logits, (-1, n_ques, config.max_seq_length)).tolist()  # batch, 3, max_seq_len
         input_mask = np.reshape(input_mask, (-1, n_ques, config.max_seq_length)).tolist()
         label_mask = np.reshape(label_mask, (-1, n_ques, config.max_seq_length)).tolist()
         valid_ids = np.reshape(valid_ids, (-1, n_ques, config.max_seq_length)).tolist()
+
         label_ids = np.reshape(label_ids, (-1, n_ques, config.max_seq_length)).tolist()  # batch, 3, max_seq_len
         rel_logits=rel_logits.tolist()
 
@@ -719,14 +744,16 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
         rel_logits_lst+=rel_logits
         gold_lst += [batch_input_type[0] for batch_input_type in label_ids]  # batch, 1, max_seq_len
         label_mask_lst += [batch_input_type[0] for batch_input_type in label_mask]
-        valid_lst += [batch_valid_ids[0] for batch_valid_ids in valid_ids]
+        valid_lst += valid_ids
+        # print(len(valid_ids),len(label_ids))
+        # print(len(valid_lst),len(gold_lst))
         type_lst += input_types  # type_lst: all_example
         etype_lst += entity_types  # etype_lst: all_example
         gold_relation += relations
         doc_token_lst += doc_tokens
         doc_id_lst+=doc_ids
         eval_steps += 1
-
+        # print(gold_lst)
 
 
     if(relation_flag):
@@ -738,7 +765,7 @@ def evaluate(model_object, eval_features, config, device, eval_sign="dev",relati
         logger.info("relation filter: {}, {}, {}".format(rel_p,rel_r,rel_f1))
     loss = round(eval_loss / eval_steps, 4) if eval_steps>0 else 0
 
-    return loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst,doc_id_lst
+    return loss, input_lst, doc_token_lst, input_mask_lst, pred_lst, gold_lst, label_mask_lst, type_lst, etype_lst, gold_relation,rel_logits_lst,doc_id_lst,valid_lst
 
 
 
@@ -750,6 +777,7 @@ def predict(tokenizer, model, ent_train_features,rel_train_features, dev_feature
           device, n_gpu, label_list,ent_weight=[1.0]*3,rel_weight=[1.0]*3,eval_train=True,eval_test=True,eval_dev=True,data_processor=None):
     logger = config.logger
     unused=config.unused_flag
+
     if(eval_train):
         # print(len(ent_train_features),len(rel_train_features))
         with open("test.txt", 'a', encoding='utf-8') as f:
@@ -862,8 +890,10 @@ def main(id,args,extra_args,logger,eval_train=False,eval_test=True,eval_dev=Fals
                     now_best_test = dic["now_best_test"]
                     logger.info("last best test:"+str(now_best_test))
                 dic=dic["model"]
-
-            model.load_state_dict(dic)
+            if(n_gpu>1):
+                model.module.load_state_dict(dic)
+            else:
+                model.load_state_dict(dic)
             # state_dict=model.state_dict()
             # for k,v in state_dict.items():
             #     logger.info(k)
@@ -909,7 +939,7 @@ def main(id,args,extra_args,logger,eval_train=False,eval_test=True,eval_dev=Fals
             #     logger.info("load {} ....".format(predict_model_path1))
             #     model.load_state_dict(torch.load(predict_model_path1, map_location=device))
             else:
-                logger.info("model is not exists...")
+                logger.info("{} model is not exists...".format(predict_model_path))
         test_result=predict(tokenizer, model, ent_train_loader, rel_train_loader, dev_loader, test_loader, config, device,
                 n_gpu, label_list, eval_train=eval_train, eval_test=eval_test, eval_dev=eval_dev,data_processor=data_processor)
     return test_result
@@ -952,13 +982,13 @@ def experiment(id,flag,beg,end,gpu_num,dataset,text,model,use_old_model):
         if (len(config_file) > 0):
             args.config_file = config_file
         test_result = main(id, args, extra_args, logger, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],
-                           use_old_model=flag[3],
+                           use_old_model=use_old_model,
                            begepoch=begepoch, gpu_num=gpu_num)
         if (dataset == 'conll04' and len(text)):
             names = ['spo', 'normal']
             for name in names:
                 main(id, args, extra_args, eval_train=flag[0], eval_test=flag[1], eval_dev=flag[2],
-                     use_old_model=flag[3],
+                     use_old_model=use_old_model,
                      begepoch=begepoch, name=name, gpu_num=gpu_num)
         if (len(test_result) > 0):
             idx = begepoch
@@ -1021,8 +1051,6 @@ if __name__ == "__main__":
     # flag=[False,False,False,True]
 
     # index=[1,1]
-    index=[1,0]
-    gpu_num=1
 
 
     # # id='20210114-104820'#59
@@ -1086,9 +1114,9 @@ if __name__ == "__main__":
     # text=''
     # beg,end=1,2
     # index=[1,0]
-    flag[0]=not flag[0]
+    # flag[0]=not flag[0]
     # flag[1] = not flag[1]
-    flag[2]=not flag[2]
+    # flag[2]=not flag[2]
 
 
     # gpu_num=0
@@ -1106,6 +1134,17 @@ if __name__ == "__main__":
     # beg, end = 4,5
     # use_old_model = True
 
+    # index = [0, 2]
+    # gpu_num = 1
+    # id = '20210206-160510'
+    # use_old_model = True
+    # text = 'predict_'
+    # beg, end = 0, 1
+    index=[1,0]
+    id='20210208-234137'
+    flag=[False,True,False]
+    use_old_model = True
+    beg,end=0,1
     dataset = ['conll04', 'ace2005', 'conll04_orig'][index[0]]
     model = ['default', 'filter', 'mrctp'][index[1]]
     experiment(id, flag, beg, end, gpu_num, dataset, text, model,use_old_model)

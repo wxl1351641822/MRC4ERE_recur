@@ -23,7 +23,7 @@ from layers.bert_layernorm import BertLayerNorm
 
 class BertFilter(nn.Module):
     #关系分类器，仅有关系分类器
-    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
+    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
         super(BertFilter, self).__init__()
         self.num_labels = num_labels
         self.num_ques = num_ques
@@ -81,7 +81,7 @@ class BertFilter(nn.Module):
         return rel_logits
 
 class BertTagger(nn.Module):
-    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
+    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
         super(BertTagger, self).__init__()
         self.num_labels = num_labels
         self.num_ques = num_ques
@@ -238,7 +238,7 @@ class HandshakingKernel(nn.Module):
         return long_shaking_hiddens
 
 class MRCTPLinker(nn.Module):
-    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
+    def __init__(self, config, num_labels=4, num_ques=3,num_rel_labels=5,device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'),pool_output='avg'):
         super(MRCTPLinker, self).__init__()
         self.num_labels = num_labels
         self.num_ques = num_ques
@@ -390,7 +390,7 @@ class BertTagger1(nn.Module):
         batch_size, max_len, feat_dim = sequence_output.size()
         # print(batch_size,max_len,feat_dim)
         valid_output = torch.zeros(batch_size, max_len, feat_dim, dtype=torch.float32,
-                                   device='cuda' if torch.cuda.is_available() else 'cpu')
+                                   device='cuda:0' if torch.cuda.is_available() else 'cpu')
         for i in range(batch_size):
             jj = -1
             for j in range(max_len):

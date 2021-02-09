@@ -23,6 +23,8 @@ def read_squad_examples(input_file, is_training,unused=True):
     for entry in input_data:
         print(len(entry["paragraphs"]))
         for doc_id,paragraph in enumerate(entry["paragraphs"]):
+            # if(doc_id==1):
+            #     break
             paragraph_text = paragraph["context"]
             all_relations = paragraph["relations"]
             doc_tokens = []

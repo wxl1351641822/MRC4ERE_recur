@@ -213,6 +213,7 @@ class MRCProcessor(DataProcessor):
                 features.append(group_feature)
             else:
                 print(example.doc_id, example)
+
         return features
 
 

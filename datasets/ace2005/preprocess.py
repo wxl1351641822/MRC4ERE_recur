@@ -8,6 +8,7 @@ from tqdm import tqdm
 from utils.relation_template import *
 from collections import defaultdict,Counter
 import matplotlib.pyplot as plt
+from transformers import BertTokenizer
 
 
 def aligment_ann(original, newtext, ann_file, offset):
@@ -618,7 +619,7 @@ if __name__ == "__main__":
             args.pretrained_model_path)[-1], args.overlap, args.window_size, args.threshold, args.max_distance,args.is_mq)
     else:
         output_dir = args.output_base_dir
-    from transformers import BertTokenizer
+
     # print(args.pretrained_model_path)
     print("***train***"*10)
     tokenizer = BertTokenizer.from_pretrained(args.pretrained_model_path)

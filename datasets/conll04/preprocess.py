@@ -1,7 +1,7 @@
 import os
 import json
 from collections import Counter, defaultdict
-import matplotlib.pyplot as plt
+
 import sys
 sys.path.append("../..")
 from utils.relation_template import *
@@ -44,7 +44,7 @@ class conll04PreProcess:
 
         self.ent_matrix_label=args.ent_matrix_label
         self.rel_tail_head = args.rel_tail_head
-        self.multi_decoder=args.multi_decoder
+        # self.multi_decoder=args.multi_decoder
 
     def read_file(self,path):
         with open(path, 'r', encoding='utf-8') as f:
@@ -250,11 +250,11 @@ class conll04PreProcess:
         print("seq_len:")
         print(seq_dic.keys())
         print(seq_dic.values())
-        plt.bar(list(seq_dic.keys()), list(seq_dic.values()))
-        plt.title("seq num")
-        plt.xlabel("seq num")
-        plt.ylabel("text num")
-        plt.show()
+        # plt.bar(list(seq_dic.keys()), list(seq_dic.values()))
+        # plt.title("seq num")
+        # plt.xlabel("seq num")
+        # plt.ylabel("text num")
+        # plt.show()
         ##doc 内实体统计
         print("total entities num:", Counter(num_entities), sum(num_entities))
         ##doc内rel统计

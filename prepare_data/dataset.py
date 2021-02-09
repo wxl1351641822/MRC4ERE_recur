@@ -34,14 +34,17 @@ class MRC4TPLinkerDataset(MRCProcessor):
 
         features = []
         for (ex_index, example) in enumerate(tqdm(examples)):
+
             if (type is not None and example.q_type != type):
                 continue
+            if(ex_index==100):
+                break
             textlist = example.doc_tokens
             labellist = example.label
             doc_tokens = []
             labels =[]#example.label
             doc_valid = []
-            label_mask = []
+
             tok_to_orig_index = []
             orig_to_tok_index = []
             for i, word in enumerate(textlist):
@@ -67,17 +70,18 @@ class MRC4TPLinkerDataset(MRCProcessor):
             #     print(labels)
             #     print(labellist)
             input_features = []
-            label_ids=labellist
-            if(not self.ent_matrix_label and example.q_type=='entity'):
-                print(labels)
-                label_ids = []
-                label_ids.append(ent_label_map["[CLS]"])
-                label_ids.extend([ent_label_map[l] for l in labels])
-                label_ids.append(ent_label_map["[SEP]"])
-                label_mask = [1] * len(label_ids)
-                while len(label_ids) < max_seq_length:
-                    label_ids.append(0)
-                    label_mask.append(0)
+            # label_ids=labellist
+
+            label_ids = []
+            label_mask = []
+            # label_ids.append(ent_label_map["[CLS]"])
+            label_ids.extend([ent_label_map[l] for l in labels])
+            # label_ids.append(ent_label_map["[SEP]"])
+            label_mask = [1] * len(label_ids)
+
+            while len(label_ids) < max_seq_length*(max_seq_length+1)/2:
+                label_ids.append(0)
+                label_mask.append(0)
 
             for q_idx, query in enumerate(example.question_text):
                 query_tokens = tokenizer.tokenize(query)
@@ -89,9 +93,12 @@ class MRC4TPLinkerDataset(MRCProcessor):
                     # labels = labels[0:max_doc_length]
                     doc_valid = doc_valid[0:max_doc_length]
                     # label_mask = label_mask[0:max_doc_length]
-                orig_seq_len=len(textlist)
-                if (self.ent_matrix_label or example.q_type == 'relation'):
-                    label_ids,label_mask = self.get_clip_labels(labellist, orig_seq_len, max_seq_length,rel_label_map)
+                    orig_seq_len=len(textlist)
+                    if (self.ent_matrix_label or example.q_type == 'relation'):
+                        label_ids,label_mask = self.get_clip_labels(labellist, orig_seq_len, max_doc_length,rel_label_map)
+                        while len(label_ids) < max_seq_length * (max_seq_length + 1) / 2:
+                            label_ids.append(0)
+                            label_mask.append(0)
 
 
 
@@ -139,6 +146,9 @@ class MRC4TPLinkerDataset(MRCProcessor):
                 assert len(input_mask) == max_seq_length
                 assert len(segment_ids) == max_seq_length
                 assert len(valid) == max_seq_length
+                assert len(label_ids)==max_seq_length*(max_seq_length+1)/2
+                assert len(label_mask)==max_seq_length*(max_seq_length+1)/2
+
 
 
                 input_features.append(
@@ -151,6 +161,7 @@ class MRC4TPLinkerDataset(MRCProcessor):
                         valid_id=valid
                     )
                 )
+                # print(len(label_ids),len(input_ids))
                 # print(input_ids,input_mask,segment_ids,label_ids,label_mask,valid)
                 # break
             # print(len(input_features))
@@ -180,17 +191,7 @@ class MRC4TPLinkerDataset(MRCProcessor):
                         label_mask.append(1)
                     i += 1
 
-        else:
-            for row in range(seq_len):
-                for col in range(row,seq_len):
 
-                    if(col<orig_seq_len):
-                        new_label.append(rel_label_map[labels[i]])
-                        label_mask.append(1)
-                        i += 1
-                    else:
-                        new_label.append(0)
-                        label_mask.append(0)
         return new_label,label_mask
 
 class FilterDataset:
